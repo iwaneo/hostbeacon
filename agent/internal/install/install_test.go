@@ -38,24 +38,25 @@ func TestTarballInstallsBinariesUnitsAndConfig(t *testing.T) {
 	root, source := host(t)
 	var r recorder
 	var out bytes.Buffer
-	if err := (Tarball{Root: root, Source: source, Run: r.run, Out: &out}).Install(context.Background()); err != nil {
+	if err := (Tarball{Root: root, Source: source, Version: "1.0.0", Run: r.run, Out: &out}).Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"hostbeacon", "hostbeacon-helper"} {
-		info, err := os.Stat(filepath.Join(root, "usr/local/bin", name))
+		info, err := os.Stat(filepath.Join(root, "usr/local/lib/hostbeacon/1.0.0", name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if info.Mode().Perm() != 0o755 {
 			t.Errorf("%s mode = %o, want 755", name, info.Mode().Perm())
 		}
+		wantProgram(t, root, name, "binary "+name)
 	}
 	units, err := os.ReadDir(filepath.Join(root, "etc/systemd/system"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 5 {
-		t.Errorf("%d units, want 5", len(units))
+	if len(units) != 6 {
+		t.Errorf("%d units, want 6", len(units))
 	}
 	for _, unit := range units {
 		path := filepath.Join(root, "etc/systemd/system", unit.Name())
@@ -109,7 +110,7 @@ func TestTarballKeepsTheOwnerConfig(t *testing.T) {
 	}
 	var r recorder
 	var out bytes.Buffer
-	if err := (Tarball{Root: root, Source: source, Run: r.run, Out: &out}).Install(context.Background()); err != nil {
+	if err := (Tarball{Root: root, Source: source, Version: "1.0.0", Run: r.run, Out: &out}).Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if c, _ := config.Load(path); len(c.EnabledActions) != 1 {
@@ -153,25 +154,59 @@ func TestTarballStopsWhenAPackageIsInstalled(t *testing.T) {
 	}
 }
 
+// wantProgram checks that /usr/local/bin/<name> runs a program with content.
+func wantProgram(t *testing.T, root, name, content string) {
+	t.Helper()
+	if data, err := os.ReadFile(filepath.Join(root, "usr/local/bin", name)); err != nil || string(data) != content {
+		t.Errorf("/usr/local/bin/%s = %q, %v; want %q", name, data, err, content)
+	}
+}
+
 func TestTarballInstallFromTheInstalledCopy(t *testing.T) {
-	// `sudo hostbeacon install` run again from /usr/local/bin keeps working.
-	root, _ := host(t)
-	bin := filepath.Join(root, "usr/local/bin")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
+	// `sudo hostbeacon install` run again from the installed version keeps working.
+	root, source := host(t)
+	if err := (Tarball{Root: root, Source: source, Version: "1.0.0", Run: (&recorder{}).run, Out: &bytes.Buffer{}}).Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"hostbeacon", "hostbeacon-helper"} {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("binary "+name), 0o755); err != nil {
+	installed := filepath.Join(root, "usr/local/lib/hostbeacon/1.0.0")
+	if err := (Tarball{Root: root, Source: installed, Version: "1.0.0", Run: (&recorder{}).run, Out: &bytes.Buffer{}}).Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	wantProgram(t, root, "hostbeacon", "binary hostbeacon")
+}
+
+func TestTarballInstallOfAnotherVersionSwitchesToItAndKeepsTheOld(t *testing.T) {
+	// The Agent update installs a new version this way, and a rollback runs
+	// the old version's install again.
+	root, source := host(t)
+	install := func(source, version string) {
+		t.Helper()
+		if err := (Tarball{Root: root, Source: source, Version: version, Run: (&recorder{}).run, Out: &bytes.Buffer{}}).Install(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var r recorder
-	if err := (Tarball{Root: root, Source: bin, Run: r.run, Out: &bytes.Buffer{}}).Install(context.Background()); err != nil {
+	install(source, "1.0.0")
+	newer := t.TempDir()
+	for _, name := range []string{"hostbeacon", "hostbeacon-helper"} {
+		os.WriteFile(filepath.Join(newer, name), []byte("new "+name), 0o755)
+	}
+	install(newer, "1.1.0")
+	wantProgram(t, root, "hostbeacon", "new hostbeacon")
+	wantProgram(t, root, "hostbeacon-helper", "new hostbeacon-helper")
+
+	install(filepath.Join(root, "usr/local/lib/hostbeacon/1.0.0"), "1.0.0")
+	wantProgram(t, root, "hostbeacon", "binary hostbeacon")
+}
+
+func TestTarballReplacesAnInstallWithoutVersions(t *testing.T) {
+	root, source := host(t)
+	bin := filepath.Join(root, "usr/local/bin")
+	os.MkdirAll(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "hostbeacon"), []byte("old"), 0o755)
+	if err := (Tarball{Root: root, Source: source, Version: "1.0.0", Run: (&recorder{}).run, Out: &bytes.Buffer{}}).Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(bin, "hostbeacon")); string(data) != "binary hostbeacon" {
-		t.Errorf("hostbeacon = %q, want it kept", data)
-	}
+	wantProgram(t, root, "hostbeacon", "binary hostbeacon")
 }
 
 func TestPackageUnitsRunTheProgramsFromUsrBin(t *testing.T) {

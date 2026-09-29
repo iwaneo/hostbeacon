@@ -100,7 +100,7 @@ func serve(args []string) error {
 	defer stop()
 	env := []string{"LANG=C", "LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
 	run := command.Exec(env)
-	updateRuns := helper.SystemdUpdateRun{Run: run, Request: helper.DefaultUpdateRunRequest}
+	updateRuns := helper.SystemdUnit{Run: run, Unit: helper.UpdateRunUnit, Request: helper.DefaultUpdateRunRequest}
 	// A run that ended while the helper was down, for example at a power
 	// loss, gets its result here (v1 spec §11).
 	if active, err := updateRuns.Active(ctx); err != nil {
@@ -108,6 +108,15 @@ func serve(args []string) error {
 	} else if !active {
 		if err := helper.EndUpdateRun(helper.DefaultUpdateRunRecord, helper.ActionLog{Dir: *actionLog, Now: time.Now}); err != nil {
 			log.Error("cannot complete the Update run record", "error", err)
+		}
+	}
+	// Home Assistant's Agent update runs in its own unit (v1 spec §10).
+	agentUpdates := helper.SystemdUnit{Run: run, Unit: helper.AgentUpdateUnit, Request: helper.DefaultAgentUpdateRequest}
+	if active, err := agentUpdates.Active(ctx); err != nil {
+		log.Error("cannot read the Agent update unit", "error", err)
+	} else if !active {
+		if err := helper.EndAgentUpdate(helper.DefaultAgentUpdateRecord, helper.ActionLog{Dir: *actionLog, Now: time.Now}, time.Now); err != nil {
+			log.Error("cannot complete the Agent update record", "error", err)
 		}
 	}
 	server := &helper.Server{
@@ -124,6 +133,7 @@ func serve(args []string) error {
 			PackageManager:         helper.DetectPackageManager("/"),
 			UpdateRuns:             updateRuns,
 			UpdateRunRecord:        helper.DefaultUpdateRunRecord,
+			AgentUpdates:           agentUpdates,
 			// An orderly reboot, with no delay (v1 spec §9).
 			Reboot: func(ctx context.Context) error {
 				_, err := run(ctx, "systemctl", "reboot")
@@ -207,7 +217,7 @@ func updateRun(args []string) error {
 		PackageManagerLocks:    helper.DefaultPackageManagerLocks,
 		PackageManagerPIDLocks: helper.DefaultPackageManagerPIDLocks,
 		Log:                    helper.ActionLog{Dir: *actionLog, Now: time.Now},
-		Ready:                  notifyReady,
+		Ready:                  helper.NotifyReady,
 		Now:                    time.Now,
 		LockWait:               5 * time.Minute,
 		LogWait:                30 * time.Second,
@@ -236,22 +246,6 @@ func updateRunEnded(args []string) error {
 		return errors.New("must run as root")
 	}
 	return helper.EndUpdateRun(helper.DefaultUpdateRunRecord, helper.ActionLog{Dir: *actionLog, Now: time.Now})
-}
-
-// notifyReady tells systemd that the unit is ready (sd_notify READY=1).
-func notifyReady() error {
-	socket := os.Getenv("NOTIFY_SOCKET")
-	if socket == "" {
-		return errors.New("NOTIFY_SOCKET is not set: only the Update run unit runs an Update run")
-	}
-	// A name starting with @ is an abstract socket; Go handles it.
-	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: socket, Net: "unixgram"})
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	_, err = conn.Write([]byte("READY=1"))
-	return err
 }
 
 // listen makes the socket. Only root and the Agent's group can connect;

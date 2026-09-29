@@ -1,0 +1,23 @@
+# Runs one Agent update (v1 spec §10). The root helper starts it after it
+# accepted an agent_update Action, and `hostbeacon update` for the owner. It
+# runs the network part's program as root, so the helper keeps no network
+# code; it goes on while it restarts both parts of the Agent.
+[Unit]
+Description=Hostbeacon Agent update
+Documentation=https://github.com/iwaneo/hostbeacon
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Ready once the unit holds the package-task lock: the helper answers
+# "accepted" only then.
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/hostbeacon agent-update
+# Also after a crash: an update without a result is marked result unknown.
+ExecStopPost=/usr/bin/hostbeacon agent-update-ended
+# The record, and the staging directory with the installed version's package.
+StateDirectory=hostbeacon-helper
+StateDirectoryMode=0755
+# Shorter than Home Assistant waits for the answer.
+TimeoutStartSec=20s

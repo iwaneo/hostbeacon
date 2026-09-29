@@ -46,11 +46,12 @@ echo "-- the user, the state directory, and root-owned files"
 getent passwd hostbeacon | grep -q nologin || fail "the hostbeacon user has a login shell: $(getent passwd hostbeacon)"
 [ "$(stat -c '%a %U' /var/lib/hostbeacon)" = "700 hostbeacon" ] ||
 	fail "/var/lib/hostbeacon is $(stat -c '%a %U' /var/lib/hostbeacon), want 700 hostbeacon"
-for file in /usr/bin/hostbeacon* /usr/local/bin/hostbeacon* /usr/lib/systemd/system/hostbeacon* \
-	/etc/systemd/system/hostbeacon* /etc/hostbeacon /etc/hostbeacon/config.json; do
+# The tarball's programs in /usr/local/bin are symlinks: their targets count.
+for file in /usr/bin/hostbeacon* /usr/local/bin/hostbeacon* /usr/local/lib/hostbeacon /usr/local/lib/hostbeacon/*/* \
+	/usr/lib/systemd/system/hostbeacon* /etc/systemd/system/hostbeacon* /etc/hostbeacon /etc/hostbeacon/config.json; do
 	[ -e "$file" ] || continue
-	[ "$(stat -c %U "$file")" = root ] || fail "$file is not owned by root"
-	[ -z "$(find "$file" -maxdepth 0 -perm /022)" ] || fail "$file can be changed by others than root"
+	[ "$(stat -L -c %U "$file")" = root ] && [ "$(stat -c %U "$file")" = root ] || fail "$file is not owned by root"
+	[ -z "$(find -L "$file" -maxdepth 0 -perm /022)" ] || fail "$file can be changed by others than root"
 done
 
 echo "-- the Agent starts"
@@ -81,6 +82,10 @@ echo "-- setup, flags-only form"
 hostbeacon setup --actions reboot,update_run --vpn-address 100.101.102.103
 hostbeacon status | grep -q '^Actions: *Reboot, Update run' || fail "setup did not turn on the Actions"
 systemctl is-active --quiet hostbeacon.service || fail "the Agent does not run after setup"
+
+echo "-- the Agent update unit runs (a development build cannot update itself)"
+out=$(hostbeacon update 2>&1) && fail "hostbeacon update of a development build succeeded: $out"
+echo "$out" | grep -q "is not a release" || fail "hostbeacon update said: $out"
 
 id=$(grep -o '"instance_id": *"[^"]*"' /var/lib/hostbeacon/identity.json)
 case $kind in

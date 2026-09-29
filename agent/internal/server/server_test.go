@@ -486,23 +486,6 @@ func TestUnknownRequestGetsUnsupported(t *testing.T) {
 	}
 }
 
-func TestNoCommonProtocolMajorClosesTheConnection(t *testing.T) {
-	a := startAgent(t, nil)
-	ha, _ := pair(t, a, a.newCode(t))
-	ws, _, err := ha.dial(t, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn := listen(t, ws)
-	message, _ := read(t, conn, 5*time.Second)
-	hello := message.(*protocol.HelloRequest)
-	reply, _ := protocol.Encode(&protocol.HelloReply{ID: "r1", ReplyTo: hello.ID, IntegrationVersion: "9", ProtocolVersion: "9.0", ProtocolMajors: []int{9}})
-	sendFrame(t, conn, reply)
-	if message, err := read(t, conn, 5*time.Second); err == nil {
-		t.Fatalf("got %T, want the connection closed", message)
-	}
-}
-
 func TestLogsHoldNoKeyOrCode(t *testing.T) {
 	a := startAgent(t, nil)
 	a.newCode(t)

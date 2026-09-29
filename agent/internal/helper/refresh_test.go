@@ -77,7 +77,7 @@ func TestRefreshRunsTheListRefreshAndStoresItsTime(t *testing.T) {
 			if !slices.Equal(r.commands, []string{command}) {
 				t.Errorf("commands %q, want %q", r.commands, command)
 			}
-			if got := r.stamp(t); got != "2026-09-29T12:00:00Z\n" {
+			if got := r.stamp(t); got != `{"format":1,"refreshed_at":"2026-09-29T12:00:00Z"}`+"\n" {
 				t.Errorf("stamp %q", got)
 			}
 			if last, ok := ReadPackageListStamp(r.Stamp); !ok || !last.Equal(refreshNow) {
@@ -103,7 +103,7 @@ func TestRefreshRunsOnlyWhenTheListIsOlderThan24Hours(t *testing.T) {
 		// A stamp from the future (the clock went back) is not trusted.
 		{-time.Hour, RefreshDone},
 	} {
-		os.WriteFile(r.Stamp, []byte(refreshNow.Add(-test.age).Format(time.RFC3339)+"\n"), 0o644)
+		writeStamp(r.Stamp, refreshNow.Add(-test.age))
 		r.commands = nil
 		result, err := r.Refresh(context.Background(), refreshOn)
 		wantResult(t, result, err, test.want)
@@ -202,7 +202,7 @@ func TestRefreshHoldsThePackageTaskLockWhileItRuns(t *testing.T) {
 
 func TestFailedRefreshKeepsTheOldStamp(t *testing.T) {
 	r := newRefresh(t, "apt")
-	old := "2026-09-01T00:00:00Z\n"
+	old := `{"format":1,"refreshed_at":"2026-09-01T00:00:00Z"}`
 	os.WriteFile(r.Stamp, []byte(old), 0o644)
 	r.fail = errors.New("exit status 100")
 	if _, err := r.Refresh(context.Background(), refreshOn); err == nil {

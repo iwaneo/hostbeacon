@@ -49,7 +49,7 @@ func TestAvailableUpdatesCarryTheLastRefreshTime(t *testing.T) {
 		t.Errorf("never refreshed: last refresh %q, want null", *updates.LastRefresh)
 	}
 
-	writeStamp(t, root, "2026-09-28T03:04:05Z\n")
+	writeStamp(t, root, `{"format":1,"refreshed_at":"2026-09-28T03:04:05Z"}`)
 	updates := collector.Sample(context.Background()).AvailableUpdates
 	if updates.LastRefresh == nil || *updates.LastRefresh != "2026-09-28T03:04:05Z" {
 		t.Errorf("last refresh %v", updates.LastRefresh)
@@ -104,7 +104,7 @@ func TestEndOfAPackageTaskRereadsAvailableUpdates(t *testing.T) {
 	tasks.set(true)
 	waitFor(t, last(func(g protocol.Groups) bool { return g.Flags != nil && g.Flags.PackageTaskRunning }))
 
-	writeStamp(t, root, "2026-09-29T12:00:00Z\n")
+	writeStamp(t, root, `{"format":1,"refreshed_at":"2026-09-29T12:00:00Z"}`)
 	tasks.set(false)
 	waitFor(t, last(func(g protocol.Groups) bool {
 		return g.AvailableUpdates != nil && g.AvailableUpdates.LastRefresh != nil && *g.AvailableUpdates.LastRefresh == "2026-09-29T12:00:00Z"
@@ -124,7 +124,7 @@ func TestPackageTaskUnitPath(t *testing.T) {
 
 func TestTurnWithoutARefreshDoesNotRereadAvailableUpdates(t *testing.T) {
 	root := fakeHost(t)
-	writeStamp(t, root, "2026-09-29T12:00:00Z\n")
+	writeStamp(t, root, `{"format":1,"refreshed_at":"2026-09-29T12:00:00Z"}`)
 	host := detect(t, root, "none", nil)
 	tasks := newFakeTasks()
 	host.Tasks = tasks

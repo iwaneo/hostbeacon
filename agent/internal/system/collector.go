@@ -143,6 +143,9 @@ type Collector struct {
 	// runFinished is the finish time of the last run read.
 	runMu       sync.Mutex
 	runFinished *string
+	// newest is the newest Agent version from the daily release check.
+	newestMu sync.Mutex
+	newest   *string
 }
 
 // NewCollector makes a Collector and takes the first CPU and network
@@ -278,7 +281,19 @@ func (c *Collector) agentGroup() *protocol.AgentInfo {
 	if hostname := Hostname(c.host.Root); hostname != "" {
 		agent.Hostname = hostname
 	}
+	c.newestMu.Lock()
+	agent.NewestAgentVersion = c.newest
+	c.newestMu.Unlock()
 	return &agent
+}
+
+// SetNewestAgentVersion sets the newest Agent version and publishes the
+// agent group.
+func (c *Collector) SetNewestAgentVersion(version string, publish func(protocol.Groups)) {
+	c.newestMu.Lock()
+	c.newest = &version
+	c.newestMu.Unlock()
+	publish(protocol.Groups{Agent: c.agentGroup()})
 }
 
 // publishFlags reads and publishes the flags group.

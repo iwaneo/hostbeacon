@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -265,15 +266,21 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // session runs one logged-in connection: hello, then a snapshot, then a
-// delta each time the state changes.
+// delta each time the state changes. When Home Assistant speaks no protocol
+// major this Agent does, the connection goes on in limited mode: no state,
+// and only the Agent update and Pairing removal (v1 spec §6.5).
 func (s *Server) session(ctx context.Context, ws *websocket.Conn, login pairing.Pairing) error {
 	defer ws.CloseNow()
 	ws.SetReadLimit(maxFrameBytes)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	groups, changed := s.State.Groups()
 	hello := s.Hello
 	hello.Hostname = s.hostname()
+	if groups.Agent != nil {
+		hello.NewestAgentVersion = groups.Agent.NewestAgentVersion
+	}
 	hello.ID = identity.NewUUID()
 	hello.ProtocolVersion = protocol.Version
 	hello.ProtocolMajors = protocol.Majors
@@ -283,13 +290,15 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn, login pairing.
 
 	replies := make(chan *protocol.HelloReply, 1)
 	readDone := make(chan error, 1)
-	go func() { readDone <- s.read(ctx, ws, login, hello.ID, replies) }()
+	var limited atomic.Bool
+	go func() { readDone <- s.read(ctx, ws, login, hello.ID, replies, &limited) }()
 
 	select {
 	case reply := <-replies:
 		if !slices.ContainsFunc(reply.ProtocolMajors, func(major int) bool { return slices.Contains(protocol.Majors, major) }) {
-			ws.Close(websocket.StatusPolicyViolation, "no common protocol major")
-			return errors.New("no common protocol major")
+			limited.Store(true)
+			s.Log.Warn("Home Assistant speaks no protocol version this Agent does, so only Agent update and Pairing removal work; update the Agent or Hostbeacon in Home Assistant",
+				"pairing", login.Name, "agent_majors", protocol.Majors, "home_assistant_majors", reply.ProtocolMajors)
 		}
 		if reply.HostID != nil && s.KnownID != nil {
 			if err := s.KnownID(*reply.HostID); err != nil {
@@ -303,17 +312,34 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn, login pairing.
 		return errors.New("no hello reply")
 	}
 
-	groups, changed := s.State.Groups()
-	sent := snapshotGroups(hello, groups)
-	if err := send(ctx, ws, &protocol.Snapshot{ID: identity.NewUUID(), Groups: sent}); err != nil {
-		return err
+	var sent protocol.Groups
+	if !limited.Load() {
+		groups, changed = s.State.Groups()
+		sent = snapshotGroups(hello, groups)
+		if err := send(ctx, ws, &protocol.Snapshot{ID: identity.NewUUID(), Groups: sent}); err != nil {
+			return err
+		}
 	}
+	// The last Agent update result sent. The Agent restarts during an
+	// update, so a new connection gets the result of the last one.
+	sentResult := ""
 	for {
+		if result := s.State.AgentUpdateResult(); result != nil && result.ActionID != sentResult {
+			sentResult = result.ActionID
+			message := *result
+			message.ID = identity.NewUUID()
+			if err := send(ctx, ws, &message); err != nil {
+				return err
+			}
+		}
 		select {
 		case err := <-readDone:
 			return err
 		case <-changed:
 			groups, changed = s.State.Groups()
+			if limited.Load() {
+				continue
+			}
 			delta, ok := changedGroups(sent, groups)
 			if !ok {
 				continue
@@ -352,7 +378,9 @@ func snapshotGroups(hello protocol.HelloRequest, groups protocol.Groups) protoco
 }
 
 // read handles the messages Home Assistant sends until the connection ends.
-func (s *Server) read(ctx context.Context, ws *websocket.Conn, login pairing.Pairing, helloID string, replies chan<- *protocol.HelloReply) error {
+// In limited mode, it answers only agent_update Action requests and
+// pairing_remove.
+func (s *Server) read(ctx context.Context, ws *websocket.Conn, login pairing.Pairing, helloID string, replies chan<- *protocol.HelloReply, limited *atomic.Bool) error {
 	for {
 		messageType, frame, err := ws.Read(ctx)
 		if err != nil {
@@ -384,8 +412,15 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn, login pairing.Pai
 		case *protocol.PairingRemoveRequest:
 			return s.removePairing(ctx, ws, login, m)
 		case *protocol.ActionRequest:
+			if limited.Load() && m.Action != protocol.ActionAgentUpdate {
+				s.Log.Warn("ignored an Action request in limited mode", "action", m.Action, "pairing", login.Name)
+				continue
+			}
 			go s.action(ctx, ws, login, m)
 		case *protocol.Unknown:
+			if limited.Load() {
+				continue
+			}
 			if reply, ok := protocol.UnsupportedReply(m, identity.NewUUID()); ok {
 				if err := send(ctx, ws, reply); err != nil {
 					return err

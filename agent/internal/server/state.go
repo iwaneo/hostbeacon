@@ -8,11 +8,13 @@ import (
 )
 
 // State holds the latest state groups. The collector sets them; each
-// connection sends a delta with the groups that changed.
+// connection sends a delta with the groups that changed. It also holds the
+// result of the last Agent update, which each connection sends once.
 type State struct {
-	mu      sync.Mutex
-	groups  protocol.Groups
-	changed chan struct{}
+	mu          sync.Mutex
+	groups      protocol.Groups
+	agentUpdate *protocol.ActionResult
+	changed     chan struct{}
 }
 
 // NewState starts with the given groups.
@@ -32,6 +34,26 @@ func (s *State) Set(groups protocol.Groups) {
 	s.groups = merged
 	close(s.changed)
 	s.changed = make(chan struct{})
+}
+
+// SetAgentUpdateResult sets the result of the last Agent update Home
+// Assistant asked for; nil when there is none to send.
+func (s *State) SetAgentUpdateResult(result *protocol.ActionResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if reflect.DeepEqual(result, s.agentUpdate) {
+		return
+	}
+	s.agentUpdate = result
+	close(s.changed)
+	s.changed = make(chan struct{})
+}
+
+// AgentUpdateResult is the result of the last Agent update, or nil.
+func (s *State) AgentUpdateResult() *protocol.ActionResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentUpdate
 }
 
 // Groups returns the groups and a channel that closes when one changes.

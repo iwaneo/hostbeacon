@@ -15,7 +15,7 @@ import (
 
 // PackageTaskUnits are the systemd units of package tasks. While one runs,
 // the flags group says package_task_running (v1 spec §4.6, §6.3).
-var PackageTaskUnits = []string{"hostbeacon-package-list-refresh.service", helper.UpdateRunUnit}
+var PackageTaskUnits = []string{"hostbeacon-package-list-refresh.service", helper.UpdateRunUnit, helper.AgentUpdateUnit}
 
 // PackageTasks says whether a package task runs, and signals when one starts
 // or ends.
