@@ -209,6 +209,26 @@ func TestSignalMissingAtInstallIsNotChecked(t *testing.T) {
 	}
 }
 
+func TestNoSignalAtInstallMeansNoneIsCheckedLater(t *testing.T) {
+	dir := t.TempDir()
+	original, _ := start(t, dir, Signals{})
+	start(t, dir, install)
+	copied, check := start(t, dir, with(SignalMachineID, "0000000000000000000000000000000f"))
+	if check.Outcome != Same || copied.InstanceID != original.InstanceID {
+		t.Errorf("outcome = %v: signals were stored after install", check.Outcome)
+	}
+}
+
+func TestKeepIgnoresASignalThatWasNeverChecked(t *testing.T) {
+	dir := t.TempDir()
+	lxc := Signals{Values: map[string]string{SignalMachineID: install.Values[SignalMachineID]}}
+	start(t, dir, lxc)
+	lxc.Unreadable = []string{SignalSMBIOSUUID}
+	if dropped, err := Keep(dir, lxc, false); err != nil || len(dropped) != 0 {
+		t.Errorf("Keep = %v, %v; want no error and nothing dropped", dropped, err)
+	}
+}
+
 func TestResetDoesTheCopyPathByHand(t *testing.T) {
 	dir := t.TempDir()
 	original, _ := start(t, dir, install)

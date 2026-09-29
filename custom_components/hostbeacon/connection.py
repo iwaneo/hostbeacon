@@ -15,7 +15,7 @@ import dataclasses
 import logging
 import random
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
 
@@ -93,17 +93,22 @@ async def can_log_in(session: aiohttp.ClientSession, host: str, port: int, finge
         return False
 
 
+async def _messages(ws: aiohttp.ClientWebSocketResponse) -> AsyncIterator[protocol.Message]:
+    """The messages on ws until it closes. Malformed ones are skipped."""
+    async for frame in ws:
+        if frame.type != aiohttp.WSMsgType.TEXT:
+            break
+        try:
+            yield protocol.decode(frame.data)
+        except protocol.ProtocolError:
+            continue
+
+
 async def read_run_id(session: aiohttp.ClientSession, host: str, port: int, fingerprint: bytes, key: bytes) -> str | None:
     """The run ID of the Agent at host and port, if it has the pinned certificate and accepts the key."""
     try:
         async with asyncio.timeout(TIMEOUT), _connect(session, host, port, fingerprint, key) as ws:
-            async for frame in ws:
-                if frame.type != aiohttp.WSMsgType.TEXT:
-                    break
-                try:
-                    message = protocol.decode(frame.data)
-                except protocol.ProtocolError:
-                    continue
+            async for message in _messages(ws):
                 if isinstance(message, protocol.HelloRequest):
                     return message.run_id
     except (aiohttp.ClientError, OSError, TimeoutError):
@@ -119,13 +124,7 @@ async def remove_pairing(session: aiohttp.ClientSession, host: str, port: int, f
     request_id = str(uuid.uuid4())
     try:
         async with asyncio.timeout(TIMEOUT), _connect(session, host, port, fingerprint, key) as ws:
-            async for frame in ws:
-                if frame.type != aiohttp.WSMsgType.TEXT:
-                    break
-                try:
-                    message = protocol.decode(frame.data)
-                except protocol.ProtocolError:
-                    continue
+            async for message in _messages(ws):
                 if isinstance(message, protocol.HelloRequest):
                     await ws.send_str(protocol.encode(_hello_reply(message)))
                     await ws.send_str(protocol.encode(protocol.PairingRemoveRequest(id=request_id)))

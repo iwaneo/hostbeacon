@@ -292,6 +292,10 @@ class HostbeaconConfigFlow(ConfigFlow, domain=DOMAIN):
         # If the Agent still knows the old key, remove that Pairing. If not,
         # the Agent refuses the key and nothing happens.
         await remove_pairing(session, self._host, self._port, paired.fingerprint, base64.b64decode(entry.data[CONF_KEY]))
+        # The new instance ID may wait in Discovered as a new Host.
+        for flow in self._async_in_progress(include_uninitialized=True):
+            if flow["context"].get("unique_id") == paired.instance_id:
+                self.hass.config_entries.flow.async_abort(flow["flow_id"])
         return self.async_update_reload_and_abort(
             entry,
             data_updates={
@@ -301,4 +305,5 @@ class HostbeaconConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_KEY: base64.b64encode(paired.key).decode(),
                 CONF_INSTANCE_ID: paired.instance_id,
             },
+            reason="reauth_successful",
         )

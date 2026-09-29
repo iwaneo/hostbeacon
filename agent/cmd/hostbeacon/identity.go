@@ -137,8 +137,8 @@ func (o owner) confirm(yes bool) error {
 	return nil
 }
 
-// restarted restarts the Agent, or tells the owner to.
-func (o owner) restarted() {
+// restartAgent restarts the Agent, or tells the owner to.
+func (o owner) restartAgent() {
 	if err := o.restart(); err != nil {
 		fmt.Fprintln(o.out, "Restart the Agent now: sudo systemctl restart hostbeacon")
 		return
@@ -176,7 +176,7 @@ reaches this Host as the Host it shows now; add it again as a new Host.
 	if before.InstanceID != "" {
 		fmt.Fprintf(o.out, "The old instance ID %s is in the copied-from list.\n", before.InstanceID)
 	}
-	o.restarted()
+	o.restartAgent()
 	return nil
 }
 
@@ -201,7 +201,7 @@ func keepIdentity(args []string, o owner) error {
 		fmt.Fprintf(o.out, "Warning: the Agent no longer checks %s. Clone detection is weaker now.\n", signalNames(dropped))
 	}
 	fmt.Fprintln(o.out, "This Host keeps its identity.")
-	o.restarted()
+	o.restartAgent()
 	return nil
 }
 
@@ -237,7 +237,7 @@ func regenerateKey(args []string, o owner) error {
 		return err
 	}
 	fmt.Fprintf(o.out, "Removed every Pairing. New certificate fingerprint: %x\n", id.Fingerprint)
-	o.restarted()
+	o.restartAgent()
 	return nil
 }
 

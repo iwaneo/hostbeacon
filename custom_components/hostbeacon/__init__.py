@@ -74,23 +74,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -
         )
 
     entry.async_on_unload(connection.add_listener(update_device))
-    _track_certificate(hass, entry, connection)
+    _track_problems(hass, entry, connection)
     await _track_reboot(hass, entry, connection)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, connection.run(), f"hostbeacon connection {entry.title}")
     return True
 
 
-def _track_certificate(hass: HomeAssistant, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
-    """Raise the certificate repair while the Agent shows another certificate (v1 spec §7.7).
+def _track_problems(hass: HomeAssistant, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
+    """Raise the certificate repair while the Agent shows another certificate (v1 spec §7.7),
+    and start Re-pair when the Agent refuses the key.
 
-    Its fix starts Re-pair. It is removed once the Host is connected again.
+    The repair's fix starts Re-pair. It is removed once the Host is connected again.
     """
     issue_id = f"certificate_changed_{entry.entry_id}"
     raised: bool | None = None
 
     @callback
-    def certificate_changed() -> None:
+    def problem_changed() -> None:
         nonlocal raised
         if connection.problem == "certificate" and raised is not True:
             raised = True
@@ -108,8 +109,12 @@ def _track_certificate(hass: HomeAssistant, entry: HostbeaconConfigEntry, connec
         elif connection.online and raised is not False:
             raised = False
             ir.async_delete_issue(hass, DOMAIN, issue_id)
+        if connection.problem == "key":
+            # The Pairing was removed on the Host, for example after a leaked
+            # key: only Re-pair helps. Home Assistant starts it only once.
+            entry.async_start_reauth(hass)
 
-    entry.async_on_unload(connection.add_listener(certificate_changed))
+    entry.async_on_unload(connection.add_listener(problem_changed))
 
 
 def _store(hass: HomeAssistant, entry: ConfigEntry) -> Store[dict]:

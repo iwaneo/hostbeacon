@@ -108,9 +108,10 @@ type identityData struct {
 	// was paired as, since it last became a copy.
 	KnownIDs   []string `json:"known_ids,omitempty"`
 	CopiedFrom []string `json:"copied_from,omitempty"`
-	// Signals holds the hash of each signal read at install. Nil in files
-	// written before the clone check: the next start stores it.
-	Signals map[string]string `json:"signals,omitempty"`
+	// Signals holds the hash of each signal read at install; empty when none
+	// could be read. Missing only in files written before the clone check:
+	// the next start stores it.
+	Signals map[string]string `json:"signals"`
 	// Hold lists the signals the last start could not read.
 	Hold []string `json:"hold,omitempty"`
 }
@@ -231,10 +232,10 @@ func Keep(dir string, signals Signals, dropMissing bool) (dropped []string, err 
 		return nil, errors.New("the Agent has no identity yet; start it once first")
 	}
 	current := signals.hashes()
-	missing := slices.Clone(signals.Unreadable)
+	var missing []string
 	for name := range data.Signals {
 		if _, ok := current[name]; !ok {
-			missing = appendNew(missing, name)
+			missing = append(missing, name)
 		}
 	}
 	slices.Sort(missing)

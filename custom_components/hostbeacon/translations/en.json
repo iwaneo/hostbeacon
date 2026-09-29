@@ -322,7 +322,7 @@
           }
         },
         "abort": {
-          "repair_started": "Re-pair of {host} started. Open Settings > Devices & services, find {host} under Hostbeacon, and select Reconfigure to continue.",
+          "repair_started": "Re-pair of {host} started. In Settings > Repairs, select \"Authentication expired for {host}\" to continue.",
           "host_removed": "This Host is no longer in Home Assistant."
         }
       }

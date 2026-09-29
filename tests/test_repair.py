@@ -177,7 +177,7 @@ async def test_reconfigure_to_a_different_certificate_hands_off_to_repair(
     result = await enter_code(hass, result["flow_id"], agent)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "reconfigure_successful"
+    assert result["reason"] == "reauth_successful"
     assert entry.unique_id == host_id
     assert entry.data[CONF_PORT] == agent.port
     await wait_for(lambda: state(hass, entry, "host_status") == "online")
@@ -186,9 +186,13 @@ async def test_reconfigure_to_a_different_certificate_hands_off_to_repair(
 async def test_re_paired_host_is_not_offered_as_a_new_host(hass: HomeAssistant, agent: FakeAgent) -> None:
     entry = await add_host(hass, agent)
     await reinstall(hass, agent, entry)
+    discovered = await discover(hass, announcement(agent))  # the new instance ID looks like a new Host
+    assert discovered["step_id"] == "pair"
     flow = await fix_certificate_repair(hass, entry)
     result = await enter_code(hass, flow["flow_id"], agent)
     await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    await hass.async_block_till_done()
+    assert not any(f["flow_id"] == discovered["flow_id"] for f in hass.config_entries.flow.async_progress())
 
     result = await discover(hass, announcement(agent))
     assert result["type"] is FlowResultType.ABORT
@@ -224,3 +228,21 @@ async def test_same_agent_at_a_second_address_raises_no_repair(
     await discover(hass, announcement(other_agent))
     assert issue(hass, "two_machines", entry) is None
     assert entry.data[CONF_PORT] == agent.port
+
+
+async def test_refused_key_starts_re_pair(hass: HomeAssistant, agent: FakeAgent) -> None:
+    """After a leaked Home Assistant key, the owner removes the Pairing on the Host, then Re-pairs."""
+    entry = await add_host(hass, agent)
+    agent.keys.clear()
+    await agent.stop()
+    await agent.start()
+    await wait_for(
+        lambda: any(
+            f["context"]["source"] == "reauth" for f in hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        )
+    )
+    flow = next(f for f in hass.config_entries.flow.async_progress_by_handler(DOMAIN))
+    result = await enter_code(hass, flow["flow_id"], agent)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["reason"] == "reauth_successful"
+    await wait_for(lambda: state(hass, entry, "host_status") == "online")
