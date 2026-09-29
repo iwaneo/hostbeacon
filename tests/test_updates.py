@@ -199,3 +199,34 @@ async def test_package_list_refreshed_sensor(hass: HomeAssistant, agent: FakeAge
     assert state(hass, entry, "package_list_refreshed") == "2026-09-29T03:00:00+00:00"
     await agent.send_groups(protocol.Groups(available_updates=updates(0)))
     await wait_for(lambda: state(hass, entry, "package_list_refreshed") == STATE_UNKNOWN)
+
+
+async def test_release_notes_when_the_host_clock_is_ahead(
+    hass: HomeAssistant, agent: FakeAgent, hass_ws_client
+) -> None:
+    """A time a little in the future (the Host clock is ahead) must not break the dialog."""
+    ahead = (dt_util.utcnow() + timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry = await add_updates_host(hass, agent, updates(0, last_refresh=ahead))
+    run = protocol.UpdateRun(
+        run_id="d4c3b2a1-9f8e-4d7c-b6a5-493827160a5b",
+        state="finished",
+        percent=None,
+        started_at=ahead,
+        finished_at=ahead,
+        result="ok",
+        installed=1,
+        remaining=0,
+        error=None,
+        needs_manual_update=protocol.NameList(count=0, names=[]),
+    )
+    await agent.send_groups(protocol.Groups(update_run=run))
+    await wait_for(lambda: entry.runtime_data.groups.update_run.result == "ok")
+    notes = await release_notes(hass, hass_ws_client, entry)
+    assert "**Package list refreshed:** 0 seconds ago" in notes
+    assert "**Last Update run:** OK, 0 seconds ago" in notes
+
+
+async def test_count_without_fingerprint_is_unknown(hass: HomeAssistant, agent: FakeAgent) -> None:
+    """Without a fingerprint the text cannot name the exact set, so Skip could hide later sets."""
+    entry = await add_updates_host(hass, agent, updates(2, fingerprint=None))
+    assert updates_state(hass, entry).state == STATE_UNKNOWN

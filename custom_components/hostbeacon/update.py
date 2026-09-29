@@ -6,6 +6,7 @@ Install comes with the Update run; this entity only shows the updates.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.const import EntityCategory
@@ -64,8 +65,11 @@ class UpdatesEntity(HostEntity, UpdateEntity):
             return None
         if updates.count == 0:
             return UP_TO_DATE
+        # Without a fingerprint the text cannot name the exact set.
+        if not updates.fingerprint:
+            return None
         text = f"{updates.count} update" if updates.count == 1 else f"{updates.count} updates"
-        return f"{text} · {updates.fingerprint[:SHORT_FINGERPRINT]}" if updates.fingerprint else text
+        return f"{text} · {updates.fingerprint[:SHORT_FINGERPRINT]}"
 
     def version_is_newer(self, latest_version: str, installed_version: str) -> bool:
         """An update exists exactly when the two texts differ."""
@@ -88,7 +92,7 @@ class UpdatesEntity(HostEntity, UpdateEntity):
         parts.append(_last_run(text, self._connection))
         refreshed = groups.available_updates.last_refresh if groups.available_updates else None
         if (when := dt_util.parse_datetime(refreshed) if refreshed else None) is not None:
-            parts.append(text("list_age", age=dt_util.get_age(when)))
+            parts.append(text("list_age", age=_age(when)))
         else:
             parts.append(text("list_never"))
         if "update_run" not in self._connection.enabled_actions:
@@ -113,6 +117,11 @@ def _package_table(text: Text, connection: HostConnection) -> str:
     return table
 
 
+def _age(when: datetime) -> str:
+    """How long ago. A time a little in the future (the Host clock is ahead) is now."""
+    return dt_util.get_age(min(when, dt_util.utcnow()))
+
+
 def _cell(value: str) -> str:
     return value.replace("|", "\\|")
 
@@ -126,5 +135,5 @@ def _last_run(text: Text, connection: HostConnection) -> str:
     if run.result is None:
         return text("last_run_none")
     finished = dt_util.parse_datetime(run.finished_at) if run.finished_at else None
-    age = dt_util.get_age(finished) if finished else "?"
+    age = _age(finished) if finished else "?"
     return text(f"last_run_{run.result}", age=age, error=run.error or "")

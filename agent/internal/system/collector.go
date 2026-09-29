@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/helper"
@@ -128,6 +129,9 @@ type Collector struct {
 	network   *NetworkSampler
 	disks     *DiskSampler
 	smart     *SmartSampler
+	// flagsMu makes each read and publish of the flags one step, so an
+	// older read is never published after a newer one.
+	flagsMu sync.Mutex
 }
 
 // NewCollector makes a Collector and takes the first CPU and network
@@ -197,7 +201,18 @@ func (c *Collector) Run(ctx context.Context, publish func(protocol.Groups)) {
 	every(c.intervals.System, func() protocol.Groups {
 		return protocol.Groups{Agent: c.agentGroup(), System: ptr(c.system.Sample())}
 	})
-	every(c.intervals.RebootRequired, func() protocol.Groups { return protocol.Groups{Flags: c.flags(ctx)} })
+	go func() {
+		ticker := time.NewTicker(c.intervals.RebootRequired)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				c.publishFlags(ctx, publish)
+			}
+		}
+	}()
 	if c.host.Tasks != nil {
 		go c.watchPackageTasks(ctx, publish)
 	}
@@ -234,6 +249,15 @@ func (c *Collector) agentGroup() *protocol.AgentInfo {
 		agent.Hostname = hostname
 	}
 	return &agent
+}
+
+// publishFlags reads and publishes the flags group.
+func (c *Collector) publishFlags(ctx context.Context, publish func(protocol.Groups)) *protocol.Flags {
+	c.flagsMu.Lock()
+	defer c.flagsMu.Unlock()
+	flags := c.flags(ctx)
+	publish(protocol.Groups{Flags: flags})
+	return flags
 }
 
 // flags holds Reboot required, the last boot, and whether a package task

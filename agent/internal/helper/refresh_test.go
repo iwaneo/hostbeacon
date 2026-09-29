@@ -228,3 +228,14 @@ func TestDetectPackageManager(t *testing.T) {
 		t.Errorf("got %q, want apt", got)
 	}
 }
+
+func TestRefreshFailsWhenThePackageTaskLockCannotBeOpened(t *testing.T) {
+	r := newRefresh(t, "apt")
+	// A directory where the lock file should be: opening it fails, and that
+	// is not a held lock.
+	os.Mkdir(r.PackageTaskLock, 0o755)
+	result, err := r.Refresh(context.Background(), refreshOn)
+	if err == nil || result == RefreshBusy {
+		t.Errorf("result %q, error %v; want an error", result, err)
+	}
+}

@@ -120,3 +120,45 @@ func TestPackageTaskUnitPath(t *testing.T) {
 		t.Errorf("path %q", got)
 	}
 }
+
+func TestTurnWithoutARefreshDoesNotRereadAvailableUpdates(t *testing.T) {
+	root := fakeHost(t)
+	writeStamp(t, root, "2026-09-29T12:00:00Z\n")
+	host := detect(t, root, "none", nil)
+	tasks := newFakeTasks()
+	host.Tasks = tasks
+	long := Intervals{
+		System: time.Hour, Network: time.Hour, Disks: time.Hour, Temperatures: time.Hour,
+		RebootRequired: time.Hour, AvailableUpdates: time.Hour, ServicesGap: time.Hour, ServicesFull: time.Hour,
+	}
+	var mu sync.Mutex
+	var flags, updates int
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	collector := NewCollector(host, long, agentInfo)
+	collector.Sample(ctx)
+	collector.Run(ctx, func(groups protocol.Groups) {
+		mu.Lock()
+		defer mu.Unlock()
+		if groups.Flags != nil {
+			flags++
+		}
+		if groups.AvailableUpdates != nil {
+			updates++
+		}
+	})
+	// The hourly turn found the list fresh: the stamp did not change.
+	tasks.set(true)
+	tasks.set(false)
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return flags == 2
+	})
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if updates != 0 {
+		t.Errorf("Available updates re-read %d times, want none", updates)
+	}
+}

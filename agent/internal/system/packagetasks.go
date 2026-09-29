@@ -56,20 +56,29 @@ func unitPath(name string) dbus.ObjectPath {
 }
 
 // watchPackageTasks publishes the flags group when a package task starts or
-// ends, and re-reads Available updates when it ends (v1 spec §4.6).
+// ends. When one ends after a list refresh, it re-reads Available updates
+// (v1 spec §4.6). Most hourly turns refresh nothing, so they read nothing.
 func (c *Collector) watchPackageTasks(ctx context.Context, publish func(protocol.Groups)) {
+	refreshed := c.lastRefresh()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.host.Tasks.PackageTaskChanges():
-			flags := c.flags(ctx)
-			publish(protocol.Groups{Flags: flags})
-			if !flags.PackageTaskRunning && c.host.has(CapabilityAvailableUpdates) {
+			flags := c.publishFlags(ctx, publish)
+			if flags.PackageTaskRunning || !c.host.has(CapabilityAvailableUpdates) {
+				continue
+			}
+			if last := c.lastRefresh(); !equal(last, refreshed) {
+				refreshed = last
 				publish(protocol.Groups{AvailableUpdates: c.availableUpdates(ctx)})
 			}
 		}
 	}
+}
+
+func equal(a, b *string) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 // lastRefresh is the time of the last successful package list refresh, or

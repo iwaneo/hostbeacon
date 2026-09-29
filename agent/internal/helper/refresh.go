@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/command"
@@ -75,8 +76,11 @@ func (p PackageListRefresh) Refresh(ctx context.Context, cfg config.Config) (Ref
 		return "", err
 	}
 	release, err := lockPackageTask(p.PackageTaskLock)
-	if err != nil {
+	if errors.Is(err, syscall.EWOULDBLOCK) {
 		return RefreshBusy, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("cannot take the package-task lock: %w", err)
 	}
 	defer release()
 	held, err := anyLockHeld(p.PackageManagerLocks)
