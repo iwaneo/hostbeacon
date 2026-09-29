@@ -58,7 +58,7 @@ func TestRaspberryPiThermalZone(t *testing.T) {
 	}
 }
 
-func TestNoCPUSensor(t *testing.T) {
+func TestNoCPUTemperature(t *testing.T) {
 	// A VM often has only the ACPI zone, which is not the CPU.
 	root := t.TempDir()
 	addHwmon(t, root, "hwmon0", "acpitz", map[string]string{"temp1": "27800"}, nil)

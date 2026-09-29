@@ -69,7 +69,7 @@ func TestBareMetalHasEveryGroup(t *testing.T) {
 	if *groups.FailedServices.Count != 1 || *groups.AvailableUpdates.Count != 1 {
 		t.Errorf("failed services %+v, updates %+v", groups.FailedServices, groups.AvailableUpdates)
 	}
-	if groups.Flags.RebootRequired != "no" || *groups.Flags.LastBoot != "2026-09-21T14:13:20Z" {
+	if groups.Flags.RebootRequired != "unknown" || *groups.Flags.LastBoot != "2026-09-21T14:13:20Z" {
 		t.Errorf("flags = %+v", groups.Flags)
 	}
 }

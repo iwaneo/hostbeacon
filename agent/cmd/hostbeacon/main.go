@@ -98,7 +98,10 @@ func serve(args []string) error {
 	defer stop()
 
 	// The package manager may write its cache and log under HOME (dnf5 does).
-	os.MkdirAll(*cacheDir, 0o700)
+	// Without this directory, only reading Available updates on dnf fails.
+	if err := os.MkdirAll(*cacheDir, 0o700); err != nil {
+		log.Warn("cannot make the cache directory", "error", err)
+	}
 	run := system.Exec([]string{"LANG=C", "LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=" + *cacheDir})
 	var services system.ServiceSource
 	if systemd, err := system.ConnectSystemd(ctx); err != nil {

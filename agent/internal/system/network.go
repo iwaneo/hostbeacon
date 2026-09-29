@@ -1,6 +1,7 @@
 package system
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,7 +36,7 @@ func NewNetworkSampler(root string, container bool, now func() time.Time) *Netwo
 
 // Sample reads the network group. A rate is the average since the last
 // Sample, so the first one has no rate. A counter that went back gives no
-// rate.
+// rate. Rates are rounded to 3 significant digits; totals are exact.
 func (n *NetworkSampler) Sample() protocol.Network {
 	now := n.now()
 	seconds := now.Sub(n.lastTime).Seconds()
@@ -47,7 +48,7 @@ func (n *NetworkSampler) Sample() protocol.Network {
 		tx, txOK := n.readCounter(name, "tx_bytes")
 		if rxOK && txOK {
 			current[name] = counters{rx: rx, tx: tx, ok: true}
-			item.RxBytesTotal, item.TxBytesTotal = roundedBytes(rx), roundedBytes(tx)
+			item.RxBytesTotal, item.TxBytesTotal = counter(rx), counter(tx)
 			if last := n.last[name]; last.ok && seconds > 0 {
 				item.RxBytesPerSecond = rate(last.rx, rx, seconds)
 				item.TxBytesPerSecond = rate(last.tx, tx, seconds)
@@ -74,7 +75,7 @@ func (n *NetworkSampler) physicalInterfaces() []string {
 			continue
 		}
 		// In a container: an Ethernet interface linked to a peer outside
-		// (veth or macvlan), which is not a bridge and not the host side of a
+		// (veth or macvlan), which is not a bridge and not the outer end of a
 		// veth pair (Docker in the container). The kernel's tunnel devices
 		// (gretap0, erspan0) have no link.
 		index, link := readTrimmed(filepath.Join(dir, "ifindex")), readTrimmed(filepath.Join(dir, "iflink"))
@@ -93,6 +94,12 @@ func (n *NetworkSampler) readCounter(name, counter string) (uint64, bool) {
 	}
 	value, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
 	return value, err == nil
+}
+
+// counter is a byte total, not rounded: it keeps increasing exactly.
+func counter(value uint64) *int64 {
+	total := int64(min(value, math.MaxInt64))
+	return &total
 }
 
 func rate(last, current uint64, seconds float64) *float64 {

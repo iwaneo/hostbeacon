@@ -190,7 +190,9 @@ def _interface(connection: HostConnection, name: str) -> Interface | None:
 
 
 def _mount_sensors(path: str) -> Iterator[HostSensorDescription]:
-    exists = lambda c: _mount(c, path) is not None  # noqa: E731
+    def exists(connection: HostConnection) -> bool:
+        return _mount(connection, path) is not None
+
     yield HostSensorDescription(
         key=f"disk_used_{path}",
         translation_key="disk_used",
@@ -217,7 +219,9 @@ def _mount_sensors(path: str) -> Iterator[HostSensorDescription]:
 
 
 def _interface_sensors(name: str) -> Iterator[HostSensorDescription]:
-    exists = lambda c: _interface(c, name) is not None  # noqa: E731
+    def exists(connection: HostConnection) -> bool:
+        return _interface(connection, name) is not None
+
     for key, field in (("download", "rx_bytes_per_second"), ("upload", "tx_bytes_per_second")):
         yield HostSensorDescription(
             key=f"{key}_{name}",

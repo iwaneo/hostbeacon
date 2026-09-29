@@ -251,7 +251,7 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn) error {
 	}
 
 	groups, changed := s.State.Groups()
-	sent := s.snapshotGroups(hello, groups)
+	sent := snapshotGroups(hello, groups)
 	if err := send(ctx, ws, &protocol.Snapshot{ID: identity.NewUUID(), Groups: sent}); err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn) error {
 
 // snapshotGroups fills in the groups a snapshot needs that the state does
 // not hold yet.
-func (s *Server) snapshotGroups(hello protocol.HelloRequest, groups protocol.Groups) protocol.Groups {
+func snapshotGroups(hello protocol.HelloRequest, groups protocol.Groups) protocol.Groups {
 	if groups.Agent == nil {
 		groups.Agent = &protocol.AgentInfo{
 			Hostname:           hello.Hostname,

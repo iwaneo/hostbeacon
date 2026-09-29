@@ -17,20 +17,20 @@ var cpuHwmon = []string{"coretemp", "k10temp", "zenpower", "cpu_thermal", "cpu-t
 // cpuThermalZones are the thermal zone types of the CPU.
 var cpuThermalZones = []string{"x86_pkg_temp", "cpu-thermal", "cpu_thermal", "soc-thermal", "soc_thermal", "cpu0-thermal"}
 
-// CPUSensor is the files that hold the CPU temperature, in millidegrees.
+// CPUTemperature is the files that hold the CPU temperature, in millidegrees.
 // When there are several (one per CPU package), the highest counts.
-type CPUSensor struct {
+type CPUTemperature struct {
 	files []string
 }
 
 // FindCPUTemperature looks for the CPU sensor in hwmon, then in the thermal
 // zones. A Host without one (most VMs) has no temperatures capability.
-func FindCPUTemperature(root string) (CPUSensor, bool) {
+func FindCPUTemperature(root string) (CPUTemperature, bool) {
 	dirs, _ := filepath.Glob(filepath.Join(root, "sys", "class", "hwmon", "hwmon*"))
 	for _, dir := range dirs {
 		if name := readTrimmed(filepath.Join(dir, "name")); slices.Contains(cpuHwmon, name) {
 			if files := hwmonCPUFiles(dir); len(files) > 0 {
-				return CPUSensor{files: files}, true
+				return CPUTemperature{files: files}, true
 			}
 		}
 	}
@@ -41,7 +41,7 @@ func FindCPUTemperature(root string) (CPUSensor, bool) {
 			files = append(files, filepath.Join(zone, "temp"))
 		}
 	}
-	return CPUSensor{files: files}, len(files) > 0
+	return CPUTemperature{files: files}, len(files) > 0
 }
 
 // hwmonCPUFiles picks the inputs that stand for the whole CPU: Intel
@@ -65,7 +65,7 @@ func hwmonCPUFiles(dir string) []string {
 }
 
 // Read reads the temperatures group. It is null when no file can be read.
-func (c CPUSensor) Read() protocol.Temperatures {
+func (c CPUTemperature) Read() protocol.Temperatures {
 	var highest *float64
 	for _, file := range c.files {
 		value, err := strconv.ParseFloat(readTrimmed(file), 64)

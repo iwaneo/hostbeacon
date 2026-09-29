@@ -67,12 +67,6 @@ func TestOSReleaseAndKernel(t *testing.T) {
 	if kernel := Kernel(root); kernel == nil || *kernel != "6.15.4-200.fc42.aarch64" {
 		t.Errorf("kernel = %v", kernel)
 	}
-	if DebianFamily(release) {
-		t.Error("Fedora is not in the Debian family")
-	}
-	if !DebianFamily(map[string]string{"ID": "raspbian", "ID_LIKE": "debian"}) || !DebianFamily(map[string]string{"ID": "ubuntu"}) {
-		t.Error("Raspberry Pi OS and Ubuntu are in the Debian family")
-	}
 }
 
 func TestLastBoot(t *testing.T) {
@@ -93,8 +87,6 @@ func TestLastBoot(t *testing.T) {
 }
 
 func TestRebootRequired(t *testing.T) {
-	debian := map[string]string{"ID": "debian"}
-	fedora := map[string]string{"ID": "fedora"}
 	kernels := func(t *testing.T, running string, installed ...string) string {
 		root := t.TempDir()
 		writeProc(t, root, "sys/kernel/osrelease", running+"\n")
@@ -107,20 +99,20 @@ func TestRebootRequired(t *testing.T) {
 	t.Run("the Debian file says yes", func(t *testing.T) {
 		root := kernels(t, "6.1.0-21-amd64", "6.1.0-21-amd64")
 		writeFile(t, filepath.Join(root, "run", "reboot-required"), "*** System restart required ***\n")
-		if got := RebootRequired(root, false, debian); got != "yes" {
+		if got := RebootRequired(root, false); got != "yes" {
 			t.Errorf("got %q, want yes", got)
 		}
 	})
 	t.Run("a newer kernel is installed", func(t *testing.T) {
 		// Proxmox: no reboot-required file, but a newer kernel.
 		root := kernels(t, "6.8.12-4-pve", "6.8.12-4-pve", "6.8.12-10-pve", "6.5.13-6-pve")
-		if got := RebootRequired(root, false, debian); got != "yes" {
+		if got := RebootRequired(root, false); got != "yes" {
 			t.Errorf("got %q, want yes", got)
 		}
 	})
 	t.Run("running the newest kernel", func(t *testing.T) {
 		root := kernels(t, "6.11.10-300.fc41.x86_64", "6.11.4-301.fc41.x86_64", "6.11.10-300.fc41.x86_64", "0-rescue-abc123")
-		if got := RebootRequired(root, false, fedora); got != "no" {
+		if got := RebootRequired(root, false); got != "no" {
 			t.Errorf("got %q, want no", got)
 		}
 	})
@@ -128,22 +120,23 @@ func TestRebootRequired(t *testing.T) {
 		root := kernels(t, "6.15.4-200.fc42.aarch64")
 		writeFile(t, filepath.Join(root, "lib", "modules", "6.15.4-200.fc42.aarch64", "vmlinuz"), "")
 		writeFile(t, filepath.Join(root, "lib", "modules", "6.15.9-201.fc42.aarch64", "vmlinuz"), "")
-		if got := RebootRequired(root, false, fedora); got != "yes" {
+		if got := RebootRequired(root, false); got != "yes" {
 			t.Errorf("got %q, want yes", got)
 		}
 	})
 	t.Run("a container does not check kernels", func(t *testing.T) {
 		root := kernels(t, "6.8.12-4-pve", "6.8.12-10-pve")
-		if got := RebootRequired(root, true, debian); got != "no" {
-			t.Errorf("Debian container: got %q, want no", got)
+		if got := RebootRequired(root, true); got != "unknown" {
+			t.Errorf("got %q, want unknown", got)
 		}
-		if got := RebootRequired(root, true, fedora); got != "unknown" {
-			t.Errorf("Fedora container: got %q, want unknown", got)
+		writeFile(t, filepath.Join(root, "run", "reboot-required"), "")
+		if got := RebootRequired(root, true); got != "yes" {
+			t.Errorf("with the marker file: got %q, want yes", got)
 		}
 	})
 	t.Run("no kernels to compare", func(t *testing.T) {
 		root := kernels(t, "6.1.0-21-amd64")
-		if got := RebootRequired(root, false, map[string]string{"ID": "arch"}); got != "unknown" {
+		if got := RebootRequired(root, false); got != "unknown" {
 			t.Errorf("got %q, want unknown", got)
 		}
 	})

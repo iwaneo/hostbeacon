@@ -99,8 +99,8 @@ func TestNetworkRatesAndTotals(t *testing.T) {
 	if second.TxBytesPerSecond == nil || *second.TxBytesPerSecond != 0.333 {
 		t.Errorf("upload = %v, want 0.333", second.TxBytesPerSecond)
 	}
-	if *second.RxBytesTotal != 4_700_000 {
-		t.Errorf("download total = %d, want 4700000 (3 significant digits)", *second.RxBytesTotal)
+	if *second.RxBytesTotal != 4_703_703 {
+		t.Errorf("download total = %d, want 4703703 (exact)", *second.RxBytesTotal)
 	}
 
 	// A counter that went back (the interface was reset) gives no rate.

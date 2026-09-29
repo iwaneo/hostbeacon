@@ -58,16 +58,6 @@ func ReadOSRelease(root string) map[string]string {
 	return values
 }
 
-// DebianFamily is true for Debian, Ubuntu, and distros based on them.
-func DebianFamily(release map[string]string) bool {
-	for _, id := range append([]string{release["ID"]}, strings.Fields(release["ID_LIKE"])...) {
-		if id == "debian" || id == "ubuntu" {
-			return true
-		}
-	}
-	return false
-}
-
 // Kernel is the running kernel release.
 func Kernel(root string) *string {
 	if kernel := readTrimmed(filepath.Join(root, "proc", "sys", "kernel", "osrelease")); kernel != "" {
@@ -115,9 +105,9 @@ func LastBoot(root string, container bool, now time.Time) *string {
 // RebootRequired is yes, no, or unknown. Yes when the Debian and Ubuntu
 // marker file exists, or when a newer kernel than the running one is
 // installed. A container runs the hypervisor's kernel, so only the marker
-// file counts there. There is no answer on distros without the marker file
-// when the kernels cannot be compared.
-func RebootRequired(root string, container bool, release map[string]string) string {
+// file counts there. Without the marker file and without kernels to compare,
+// it is unknown: not every Host writes the marker file (Proxmox does not).
+func RebootRequired(root string, container bool) string {
 	if exists(filepath.Join(root, "run", "reboot-required")) {
 		return "yes"
 	}
@@ -129,9 +119,6 @@ func RebootRequired(root string, container bool, release map[string]string) stri
 			}
 			return "no"
 		}
-	}
-	if DebianFamily(release) {
-		return "no"
 	}
 	return "unknown"
 }

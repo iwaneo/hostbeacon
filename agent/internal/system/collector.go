@@ -54,7 +54,7 @@ type Host struct {
 	Capabilities []string
 
 	services       ServiceSource
-	cpu            CPUSensor
+	cpu            CPUTemperature
 	packageManager string
 	lastBoot       *string
 }
@@ -194,7 +194,7 @@ func (c *Collector) agentGroup() *protocol.AgentInfo {
 // package system flags are not read yet.
 func (c *Collector) flags() *protocol.Flags {
 	return &protocol.Flags{
-		RebootRequired: RebootRequired(c.host.Root, c.host.Container, c.host.Release),
+		RebootRequired: RebootRequired(c.host.Root, c.host.Container),
 		LastBoot:       c.host.lastBoot,
 	}
 }
