@@ -1,24 +1,24 @@
-"""The Updates entity of a Host: its Available updates (v1 spec §7.3).
-
-Install comes with the Update run; this entity only shows the updates.
-"""
+"""The Updates entity of a Host: its Available updates, and Install runs an
+Update run (v1 spec §7.3, §8)."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
 from . import HostbeaconConfigEntry
-from .connection import HostConnection
+from .connection import ActionError, HostConnection
 from .const import DOMAIN
-from .entity import HostEntity
+from .entity import HostEntity, refusal_message
 
 UP_TO_DATE = "up to date"
 NOT_SUPPORTED = "not supported"
@@ -26,6 +26,9 @@ type Text = Callable[..., str]
 
 # Enough of the fingerprint to tell two sets apart in the version text.
 SHORT_FINGERPRINT = 8
+
+# Refusals with a message for Update run only.
+UPDATE_RUN_REFUSALS = {"disabled": "update_run_disabled"}
 
 
 async def async_setup_entry(
@@ -36,20 +39,85 @@ async def async_setup_entry(
 
 
 class UpdatesEntity(HostEntity, UpdateEntity):
-    """Shows the Available updates. The version texts name the exact set, so Skip hides only that set."""
+    """Shows the Available updates. The version texts name the exact set, so Skip hides only that set.
+
+    Install runs an Update run and waits until it ends.
+    """
 
     # Keeps Alexa, Google, and "all ... in this area" away from it.
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_supported_features = UpdateEntityFeature.RELEASE_NOTES
     _attr_translation_key = "updates"
 
     def __init__(self, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
         super().__init__(entry, connection, "updates")
-        self._host = entry.title
+        # From the Install call until the Agent reports the run.
+        self._installing = False
 
     @property
     def _supported(self) -> bool:
         return "available_updates" in self._connection.capabilities
+
+    @property
+    def supported_features(self) -> UpdateEntityFeature:
+        """Install only when Update run is enabled on the Host and the distro has full support."""
+        features = UpdateEntityFeature.RELEASE_NOTES
+        if self._supported and "update_run" in self._connection.enabled_actions:
+            features |= UpdateEntityFeature.INSTALL | UpdateEntityFeature.PROGRESS
+        return features
+
+    @property
+    def in_progress(self) -> bool:
+        """Also for a run another Home Assistant started."""
+        return self._installing or self._connection.update_running
+
+    @property
+    def update_percentage(self) -> float | None:
+        """apt gives a percent; dnf does not."""
+        run = self._connection.groups.update_run
+        return run.percent if run is not None and self._connection.update_running else None
+
+    async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
+        """Run an Update run and wait until it ends. A failed run is an error."""
+        # Read the caller before any await: the context may change after it.
+        context = self._context
+        user_id = context.user_id if context else None
+        user = None
+        if user_id is not None:
+            # Home Assistant 2026.9 and later refuse non-admins before this.
+            user = await self.hass.auth.async_get_user(user_id)
+            if user is None or not user.is_admin:
+                raise self._error("update_run_not_admin")
+        earlier = self._connection.groups.update_run
+        self._installing = True
+        self.async_write_ha_state()
+        try:
+            try:
+                # An admin without a name is still a user, not "no HA user".
+                ack = await self._connection.request_action("update_run", (user.name or user.id) if user else None)
+            except ActionError as err:
+                raise self._error("action_no_answer") from err
+            if ack.status != "accepted":
+                message, placeholders = refusal_message(ack, UPDATE_RUN_REFUSALS)
+                raise self._error(message, **placeholders)
+            try:
+                run = await self._connection.wait_for_update_run(earlier.run_id if earlier else None)
+            except ActionError as err:
+                raise self._error("update_run_result_unknown") from err
+        finally:
+            self._installing = False
+        if run.state == "result_unknown":
+            raise self._error("update_run_result_unknown")
+        if run.result == "needs_manual_update":
+            raise self._error("update_run_needs_manual_update")
+        if run.result != "ok":
+            raise self._error("update_run_failed", error=run.error or "")
+
+    def _error(self, message: str, **placeholders: str) -> HomeAssistantError:
+        return HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key=message,
+            translation_placeholders={"host": self._host_name(), "action": "Update run", **placeholders},
+        )
 
     @property
     def installed_version(self) -> str:
@@ -84,9 +152,11 @@ class UpdatesEntity(HostEntity, UpdateEntity):
             return texts[f"{prefix}release_notes_{key}.message"].format(**placeholders)
 
         if not self._supported:
-            return text("not_supported", host=self._host)
+            return text("not_supported", host=self._entry_title)
         groups = self._connection.groups
         parts = [_package_table(text, self._connection)]
+        if (manual := _needs_manual_update(text, self._connection)) is not None:
+            parts.append(manual)
         reboot = groups.flags.reboot_required if groups.flags else "unknown"
         parts.append(text(f"reboot_required_{reboot}"))
         parts.append(_last_run(text, self._connection))
@@ -96,7 +166,7 @@ class UpdatesEntity(HostEntity, UpdateEntity):
         else:
             parts.append(text("list_never"))
         if "update_run" not in self._connection.enabled_actions:
-            parts.append(text("update_run_off", host=self._host))
+            parts.append(text("update_run_off", host=self._entry_title))
         return "\n\n".join(parts)
 
 
@@ -115,6 +185,17 @@ def _package_table(text: Text, connection: HostConnection) -> str:
     if (more := updates.count - len(updates.packages)) > 0:
         table += "\n\n" + text("more", count=more)
     return table
+
+
+def _needs_manual_update(text: Text, connection: HostConnection) -> str | None:
+    """The packages of the last run that stopped at its checks, until a later run passes them."""
+    run = connection.last_run
+    if run is None or not run.needs_manual_update.count:
+        return None
+    names = ", ".join(f"`{name}`" for name in run.needs_manual_update.names)
+    if (more := (run.needs_manual_update.count or 0) - len(run.needs_manual_update.names)) > 0:
+        names += " " + text("more", count=more)
+    return text("needs_manual_update", packages=names or "-")
 
 
 def _age(when: datetime) -> str:

@@ -1,0 +1,24 @@
+# Runs one Update run (v1 spec §8). Only the root helper starts it, after it
+# accepted an update_run Action; the run goes on when the helper, the network
+# part, or Home Assistant restarts. Hostbeacon never stops it.
+[Unit]
+Description=Hostbeacon Update run
+Documentation=https://github.com/iwaneo/hostbeacon
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Ready once the unit holds the package-task lock: the helper answers
+# "accepted" only then.
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/local/bin/hostbeacon-helper update-run
+# Also after a crash: a run without a result is marked result unknown.
+ExecStopPost=/usr/local/bin/hostbeacon-helper update-run-ended
+# The run record and the package list refresh time; the network part reads them.
+StateDirectory=hostbeacon-helper
+StateDirectoryMode=0755
+CacheDirectory=hostbeacon-helper
+CacheDirectoryMode=0700
+# Shorter than Home Assistant waits for the answer.
+TimeoutStartSec=20s

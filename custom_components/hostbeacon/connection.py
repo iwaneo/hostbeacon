@@ -36,6 +36,8 @@ INTEGRATION_VERSION = "0.0.0"
 ACK_TIMEOUT = 30
 # A Host that is not back this long after an accepted Reboot is Offline.
 REBOOT_TIMEOUT = timedelta(minutes=15)
+# Update run states while the run goes on: Host status is Updating.
+RUN_ACTIVE = ("waiting_for_lock", "running")
 
 
 class ActionError(Exception):
@@ -168,6 +170,9 @@ class HostConnection:
         self.last_seen: datetime | None = None
         # Set after an accepted Reboot until the Agent is back with a new boot time.
         self.reboot: Reboot | None = None
+        # The latest Update run record that is not running: the last run's
+        # result stays while a new run goes on. None until the Agent sent one.
+        self.last_run: protocol.UpdateRun | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         # The pending Action requests by message ID: the Action and its answer.
         self._acks: dict[str, tuple[str, asyncio.Future[protocol.ActionAck]]] = {}
@@ -188,10 +193,41 @@ class HostConnection:
 
     @property
     def host_status(self) -> str:
-        """Online, Rebooting, or Offline (v1 spec §9). A timer ends Rebooting after 15 minutes."""
+        """Online, Updating, Rebooting, or Offline (v1 spec §9). A timer ends Rebooting after 15 minutes."""
         if self.reboot is not None:
             return "rebooting"
-        return "online" if self.online else "offline"
+        if not self.online:
+            return "offline"
+        return "updating" if self.update_running else "online"
+
+    @property
+    def update_running(self) -> bool:
+        """Whether an Update run waits for the package manager or runs."""
+        run = self.groups.update_run
+        return run is not None and run.state in RUN_ACTIVE
+
+    async def wait_for_update_run(self, earlier_run_id: str | None) -> protocol.UpdateRun:
+        """Wait until an Update run other than earlier_run_id ends, and return its record.
+
+        Raises ActionError when the connection ends first: then the result is unknown.
+        """
+        ended: asyncio.Future[protocol.UpdateRun] = asyncio.get_running_loop().create_future()
+
+        def check() -> None:
+            run = self.groups.update_run
+            if ended.done():
+                return
+            if not self.online:
+                ended.set_exception(ActionError())
+            elif run is not None and run.run_id != earlier_run_id and run.state in ("finished", "result_unknown"):
+                ended.set_result(run)
+
+        remove = self.add_listener(check)
+        try:
+            check()
+            return await ended
+        finally:
+            remove()
 
     def _start_reboot(self) -> None:
         """Mark the Host Rebooting after the Agent accepted a Reboot."""
@@ -300,6 +336,7 @@ class HostConnection:
                 return _hello_reply(message, self._host_id)
             case protocol.Snapshot():
                 self.groups = message.groups
+                self._keep_last_run()
                 self.online = True
                 if self.problem is not None:
                     _LOGGER.info("%s is connected again", self._name)
@@ -314,6 +351,7 @@ class HostConnection:
                     if getattr(message.groups, item.name) is not None
                 }
                 self.groups = dataclasses.replace(self.groups, **changed)
+                self._keep_last_run()
                 self._check_rebooted()
                 self._changed()
             case protocol.ActionAck():
@@ -331,6 +369,11 @@ class HostConnection:
             case protocol.Unknown():
                 return protocol.unsupported_reply(message, str(uuid.uuid4()))
         return None
+
+    def _keep_last_run(self) -> None:
+        run = self.groups.update_run
+        if run is not None and run.state not in RUN_ACTIVE:
+            self.last_run = run
 
     def _check_rebooted(self) -> None:
         """End Rebooting when the Agent reports a new boot time."""

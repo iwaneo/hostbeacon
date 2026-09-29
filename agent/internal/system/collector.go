@@ -34,6 +34,9 @@ type Intervals struct {
 	// when the event stream fails, it starts again after ContainersRetry.
 	Smart                                          time.Duration
 	ContainersGap, ContainersFull, ContainersRetry time.Duration
+	// UpdateRun is how often the Update run record is read; zero reads it
+	// only when a package task starts or ends.
+	UpdateRun time.Duration
 }
 
 // DefaultIntervals are the v1 intervals.
@@ -50,6 +53,7 @@ var DefaultIntervals = Intervals{
 	ContainersGap:    10 * time.Second,
 	ContainersFull:   60 * time.Second,
 	ContainersRetry:  30 * time.Second,
+	UpdateRun:        5 * time.Second,
 }
 
 // Host is what the Agent found on this Host at start: its environment and
@@ -130,8 +134,15 @@ type Collector struct {
 	disks     *DiskSampler
 	smart     *SmartSampler
 	// flagsMu makes each read and publish of the flags one step, so an
-	// older read is never published after a newer one.
-	flagsMu sync.Mutex
+	// older read is never published after a newer one. It also guards the
+	// last package system check.
+	flagsMu   sync.Mutex
+	broken    bool
+	brokenFix *string
+	// runMu makes each read and publish of the Update run record one step.
+	// runFinished is the finish time of the last run read.
+	runMu       sync.Mutex
+	runFinished *string
 }
 
 // NewCollector makes a Collector and takes the first CPU and network
@@ -155,7 +166,12 @@ func NewCollector(host *Host, intervals Intervals, agent protocol.AgentInfo) *Co
 // Sample reads every group once, for the first snapshot. Groups for
 // missing capabilities are left out.
 func (c *Collector) Sample(ctx context.Context) protocol.Groups {
-	groups := protocol.Groups{Agent: c.agentGroup(), System: ptr(c.system.Sample()), Flags: c.flags(ctx)}
+	groups := protocol.Groups{Agent: c.agentGroup(), System: ptr(c.system.Sample()), Flags: c.flags(ctx), UpdateRun: c.updateRun()}
+	if groups.UpdateRun != nil {
+		c.runMu.Lock()
+		c.runFinished = groups.UpdateRun.FinishedAt
+		c.runMu.Unlock()
+	}
 	if c.host.has(CapabilityDisks) {
 		groups.Disks = ptr(c.disks.Sample())
 	}
@@ -216,6 +232,20 @@ func (c *Collector) Run(ctx context.Context, publish func(protocol.Groups)) {
 	if c.host.Tasks != nil {
 		go c.watchPackageTasks(ctx, publish)
 	}
+	if c.intervals.UpdateRun > 0 {
+		go func() {
+			ticker := time.NewTicker(c.intervals.UpdateRun)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					c.publishUpdateRun(ctx, publish)
+				}
+			}
+		}()
+	}
 	if c.host.has(CapabilityNetwork) {
 		every(c.intervals.Network, func() protocol.Groups { return protocol.Groups{Network: ptr(c.network.Sample())} })
 	}
@@ -260,8 +290,8 @@ func (c *Collector) publishFlags(ctx context.Context, publish func(protocol.Grou
 	return flags
 }
 
-// flags holds Reboot required, the last boot, and whether a package task
-// runs. The package system flags are not read yet.
+// flags holds Reboot required, the last boot, whether a package task runs,
+// and whether the package system is broken.
 func (c *Collector) flags(ctx context.Context) *protocol.Flags {
 	flags := &protocol.Flags{
 		RebootRequired: RebootRequired(c.host.Root, c.host.Container),
@@ -271,7 +301,46 @@ func (c *Collector) flags(ctx context.Context) *protocol.Flags {
 		// Unknown counts as not running: the flag has no unknown value.
 		flags.PackageTaskRunning, _ = c.host.Tasks.PackageTaskRunning(ctx)
 	}
+	// While a package task runs, packages are half installed on purpose, so
+	// the last check stays. So does it when the check cannot tell.
+	if c.host.packageManager != "" && !flags.PackageTaskRunning {
+		if broken, fix, ok := PackageSystemBroken(ctx, c.host.Run, c.host.packageManager); ok {
+			c.broken, c.brokenFix = broken, fix
+		}
+	}
+	flags.PackageSystemBroken, flags.PackageSystemFixCommand = c.broken, c.brokenFix
 	return flags
+}
+
+// updateRun reads the Update run record. It is nil when the record cannot
+// be read, so the last group stays.
+func (c *Collector) updateRun() *protocol.UpdateRun {
+	record, err := helper.ReadUpdateRun(filepath.Join(c.host.Root, helper.DefaultUpdateRunRecord))
+	if err != nil {
+		return nil
+	}
+	return ptr(helper.UpdateRunGroup(record))
+}
+
+// publishUpdateRun reads and publishes the Update run record. When a run
+// has finished since the last read, it re-reads Available updates and the
+// flags (Reboot required), v1 spec §8 step 5.
+func (c *Collector) publishUpdateRun(ctx context.Context, publish func(protocol.Groups)) {
+	c.runMu.Lock()
+	defer c.runMu.Unlock()
+	run := c.updateRun()
+	if run == nil {
+		return
+	}
+	publish(protocol.Groups{UpdateRun: run})
+	if run.FinishedAt == nil || equal(run.FinishedAt, c.runFinished) {
+		return
+	}
+	c.runFinished = run.FinishedAt
+	if c.host.has(CapabilityAvailableUpdates) {
+		publish(protocol.Groups{AvailableUpdates: c.availableUpdates(ctx)})
+	}
+	c.publishFlags(ctx, publish)
 }
 
 // availableUpdates is unknown (count null) when the cache cannot be read.

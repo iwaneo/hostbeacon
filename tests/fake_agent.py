@@ -51,6 +51,23 @@ def flags(reboot_required: str = "no", last_boot: str | None = "2026-09-21T14:13
     )
 
 
+def update_run(state: str = "idle", **fields: object) -> protocol.UpdateRun:
+    """An Update run record: idle, or a run with the given fields."""
+    values: dict[str, object] = {
+        "run_id": None,
+        "state": state,
+        "percent": None,
+        "started_at": None,
+        "finished_at": None,
+        "result": None,
+        "installed": None,
+        "remaining": None,
+        "error": None,
+        "needs_manual_update": protocol.NameList(count=None, names=[]),
+    }
+    return protocol.UpdateRun(**(values | fields))
+
+
 class FakeAgent:
     """One fake Agent. Its port stays the same across stop and start."""
 
@@ -77,6 +94,7 @@ class FakeAgent:
         self.kernel: str | None = "6.12.48+deb13-amd64"
         # The groups other than agent, system, and update_run.
         self.groups = protocol.Groups(flags=flags())
+        self.update_run = update_run()
         self.code: str | None = None
         self.keys: set[bytes] = set()
         # Every request the Agent got, as "METHOD path?query" plus its headers.
@@ -153,6 +171,11 @@ class FakeAgent:
         """Change the system group and send a delta to every connection."""
         self.system = value
         await self.send_groups(protocol.Groups(system=value))
+
+    async def send_update_run(self, record: protocol.UpdateRun) -> None:
+        """Change the Update run record and send it in a delta."""
+        self.update_run = record
+        await self.send_groups(protocol.Groups(update_run=record))
 
     async def send_groups(self, groups: protocol.Groups) -> None:
         """Send a delta with these groups to every connection."""
@@ -277,17 +300,6 @@ class FakeAgent:
                 self.groups,
                 agent=self._agent_info(),
                 system=self.system,
-                update_run=protocol.UpdateRun(
-                    run_id=None,
-                    state="idle",
-                    percent=None,
-                    started_at=None,
-                    finished_at=None,
-                    result=None,
-                    installed=None,
-                    remaining=None,
-                    error=None,
-                    needs_manual_update=protocol.NameList(count=None, names=[]),
-                ),
+                update_run=self.update_run,
             ),
         )

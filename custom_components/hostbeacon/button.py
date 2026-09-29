@@ -16,19 +16,13 @@ from homeassistant.util import dt as dt_util
 from . import HostbeaconConfigEntry
 from .connection import ActionError, HostConnection
 from .const import DOMAIN
-from .entity import HostEntity
+from .entity import HostEntity, refusal_message
 
 # The Agent refuses a Reboot this long after boot.
 MIN_UPTIME = timedelta(minutes=10)
 
-# Refusals with their own message. Any other reason gets action_refused.
-REFUSAL_MESSAGES = {
-    "disabled": "reboot_disabled",
-    "too_soon_after_boot": "reboot_too_soon_after_boot",
-    "busy": "action_busy",
-    "update_run_running": "action_update_run_running",
-    "cannot_log": "action_cannot_log",
-}
+# Refusals with a message for Reboot only.
+REBOOT_REFUSALS = {"disabled": "reboot_disabled", "too_soon_after_boot": "reboot_too_soon_after_boot"}
 
 
 async def async_setup_entry(
@@ -67,7 +61,6 @@ class RebootButton(HostEntity, ButtonEntity):
 
     def __init__(self, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
         super().__init__(entry, connection, "reboot")
-        self._entry_title = entry.title
 
     @property
     def available(self) -> bool:
@@ -90,14 +83,8 @@ class RebootButton(HostEntity, ButtonEntity):
             raise self._error("action_no_answer") from err
         if ack.status == "accepted":
             return
-        reason = ack.reason or "refused"
-        if reason == "duplicate":
-            if ack.first_result is None:
-                self._refuse(context, reason, "action_duplicate")
-            if ack.first_result.result == "ok":
-                self._refuse(context, reason, "action_duplicate_ok")
-            self._refuse(context, reason, "action_duplicate_failed", error=ack.first_result.error or "")
-        self._refuse(context, reason, REFUSAL_MESSAGES.get(reason, "action_refused"), reason=reason)
+        message, placeholders = refusal_message(ack, REBOOT_REFUSALS)
+        self._refuse(context, ack.reason or "refused", message, **placeholders)
 
     def _refuse(self, context: Context | None, why: str, message: str, **placeholders: str) -> NoReturn:
         """Write the logbook entry and raise the refusal message.
@@ -128,10 +115,6 @@ class RebootButton(HostEntity, ButtonEntity):
                 **placeholders,
             },
         )
-
-    def _host_name(self) -> str:
-        device = self.device_entry
-        return (device.name_by_user or device.name) if device and device.name else self._entry_title
 
     def _reboot_possible_after(self) -> str:
         """The local time 10 minutes after the Host's last boot."""

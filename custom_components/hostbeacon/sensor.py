@@ -33,6 +33,7 @@ from .protocol import Containers, Interface, Mount, SmartDisk
 HOST_STATUS_OPTIONS = ["online", "updating", "rebooting", "offline"]
 REBOOT_REQUIRED_OPTIONS = ["yes", "no"]
 ENVIRONMENT_OPTIONS = ["bare_metal", "vm", "lxc"]
+LAST_UPDATE_RUN_OPTIONS = ["ok", "failed", "needs_manual_update", "none_yet"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -52,6 +53,23 @@ def _timestamp(text: str | None) -> datetime | None:
 
 def _has(capability: str) -> Callable[[HostConnection], bool]:
     return lambda connection: capability in connection.capabilities
+
+
+def _last_update_run(connection: HostConnection) -> str | None:
+    """The last run's result. Unknown when its result is unknown, or not sent yet."""
+    run = connection.last_run
+    if run is None:
+        return None
+    if run.state == "idle":
+        return "none_yet"
+    return run.result if run.state == "finished" else None
+
+
+def _last_update_run_details(connection: HostConnection) -> dict[str, Any]:
+    run = connection.last_run
+    if run is None or run.state == "idle":
+        return {}
+    return {"finished_at": run.finished_at, "installed": run.installed, "remaining": run.remaining, "error": run.error}
 
 
 SYSTEM_SENSORS = (
@@ -189,6 +207,15 @@ CAPABILITY_SENSORS = (
         state_class=SensorStateClass.MEASUREMENT,
         exists=_has("available_updates"),
         value=lambda c: c.groups.available_updates.count if c.groups.available_updates else None,
+    ),
+    HostSensorDescription(
+        key="last_update_run",
+        translation_key="last_update_run",
+        device_class=SensorDeviceClass.ENUM,
+        options=LAST_UPDATE_RUN_OPTIONS,
+        exists=_has("available_updates"),
+        value=_last_update_run,
+        attributes=_last_update_run_details,
     ),
     HostSensorDescription(
         key="package_list_refreshed",
@@ -390,8 +417,11 @@ class HostSensor(HostEntity, SensorEntity):
     """A value from the Host's latest state."""
 
     entity_description: HostSensorDescription
-    # Names of services and containers never go into HA history (v1 spec §7.4).
-    _unrecorded_attributes = frozenset({"services", "containers"})
+    # Names of services and containers never go into HA history (v1 spec §7.4),
+    # and neither do the details of the last Update run.
+    _unrecorded_attributes = frozenset(
+        {"services", "containers", "finished_at", "installed", "remaining", "error"}
+    )
 
     def __init__(
         self, entry: HostbeaconConfigEntry, connection: HostConnection, description: HostSensorDescription

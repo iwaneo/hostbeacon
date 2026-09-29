@@ -5,6 +5,7 @@ package command
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os/exec"
 	"time"
 )
@@ -23,22 +24,28 @@ type Stream func(ctx context.Context, line func(string), name string, args ...st
 func Exec(env []string) Command { return ExecFor(env, timeout) }
 
 // ExecFor runs programs with the given environment and stops them after
-// limit.
+// limit. A limit of 0 never stops them.
 func ExecFor(env []string, limit time.Duration) Command {
 	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(ctx, limit)
-		defer cancel()
+		if limit > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, limit)
+			defer cancel()
+		}
 		command := exec.CommandContext(ctx, name, args...)
 		command.Env = env
 		return command.Output()
 	}
 }
 
-// ExecStream runs long-lived programs with the given environment.
+// ExecStream runs long-lived programs with the given environment. When a
+// program fails, the error holds the end of its standard error, as Exec's does.
 func ExecStream(env []string) Stream {
 	return func(ctx context.Context, line func(string), name string, args ...string) error {
 		command := exec.CommandContext(ctx, name, args...)
 		command.Env = env
+		stderr := &tail{}
+		command.Stderr = stderr
 		out, err := command.StdoutPipe()
 		if err != nil {
 			return err
@@ -50,6 +57,22 @@ func ExecStream(env []string) Stream {
 		for scanner.Scan() {
 			line(scanner.Text())
 		}
-		return command.Wait()
+		err = command.Wait()
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			exit.Stderr = stderr.data
+		}
+		return err
 	}
+}
+
+// tail keeps the last 4 KiB written to it.
+type tail struct{ data []byte }
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.data = append(t.data, p...)
+	if extra := len(t.data) - 4096; extra > 0 {
+		t.data = t.data[extra:]
+	}
+	return len(p), nil
 }
