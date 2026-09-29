@@ -253,7 +253,7 @@
       "message": "Only Home Assistant admins can reboot {host}."
     },
     "reboot_disabled": {
-      "message": "Reboot is turned off on {host}. The Host owner can turn it on in the Agent config."
+      "message": "Reboot is turned off on {host}. The Host owner can turn it on with `sudo hostbeacon setup`."
     },
     "reboot_too_soon_after_boot": {
       "message": "{host} started less than 10 minutes ago. Reboot is possible after {time}."
@@ -286,7 +286,7 @@
       "message": "Only Home Assistant admins can update {host}."
     },
     "update_run_disabled": {
-      "message": "Update run is turned off on {host}. The Host owner can turn it on in the Agent config."
+      "message": "Update run is turned off on {host}. The Host owner can turn it on with `sudo hostbeacon setup`."
     },
     "update_run_failed": {
       "message": "The Update run on {host} failed: {error}"
@@ -352,7 +352,7 @@
       "message": "**Package list refreshed:** Not yet by Hostbeacon"
     },
     "release_notes_update_run_off": {
-      "message": "Update run is turned off on {host}, so Install is not offered. The Host owner can turn it on in the Agent config."
+      "message": "Update run is turned off on {host}, so Install is not offered. The Host owner can turn it on with `sudo hostbeacon setup`."
     },
     "agent_update_not_admin": {
       "message": "Only Home Assistant admins can update the Agent on {host}."

@@ -134,7 +134,7 @@ async def test_non_admin_is_refused(hass: HomeAssistant, agent: FakeAgent, hass_
 @pytest.mark.parametrize(
     ("reason", "first_result", "message"),
     [
-        ("disabled", None, "Reboot is turned off on test-host. The Host owner can turn it on in the Agent config."),
+        ("disabled", None, "Reboot is turned off on test-host. The Host owner can turn it on with `sudo hostbeacon setup`."),
         ("busy", None, "test-host is busy with a package task. Try again later."),
         ("update_run_running", None, "An Update run is already running on test-host."),
         ("cannot_log", None, "test-host refused: the Agent cannot write its Action log."),
