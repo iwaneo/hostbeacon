@@ -35,18 +35,47 @@
           "host": "IP address or hostname of the Host.",
           "port": "The Agent's port. Change it only if the Host owner changed it."
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-pair {host}",
+        "description": "Re-pair only if {host} was reinstalled, or its key or certificate was replaced. The Host keeps its entities, names, areas, automations, and history.\n\nOn the Host, run `sudo hostbeacon pair`. Enter the Host's address and the Pairing code it shows.",
+        "data": {
+          "host": "Address",
+          "port": "Port",
+          "code": "Pairing code"
+        },
+        "data_description": {
+          "host": "IP address or hostname of the Host.",
+          "port": "The Agent's port. Change it only if the Host owner changed it.",
+          "code": "12 characters, for example K7QM-4XPT-9RWD. It works once, for 10 minutes."
+        }
+      },
+      "reauth_same_host": {
+        "title": "Is this the same Host?",
+        "description": "The Agent at {address} says its hostname is **{hostname}**.\n\nIs this the same machine as {host}? If yes, select Submit. If not, close this dialog; nothing was changed."
+      },
+      "reauth_copy": {
+        "title": "Is this the same Host?",
+        "description": "The Agent at {address} says its hostname is **{hostname}**.\n\n**Warning: this machine is a copy of another Host.** Its Agent found that it was copied (for example, a cloned VM). If you Re-pair it as {host}, the original machine can no longer be shown as {host}.\n\nContinue only if this is the same machine as {host}.",
+        "data": {
+          "same_machine": "It is the same machine"
+        }
       }
     },
     "error": {
       "cannot_connect": "Cannot reach the Agent at this address. Check the address and the port, and that the Agent is running.",
       "invalid_code": "The Pairing code is wrong, expired, or already used. Make a new code on the Host and try again.",
       "pairing_failed": "Pairing failed: the Agent did not prove that it knows the code. Check that this is the address of the right Host.",
-      "certificate_changed": "The Agent at this address has a different certificate. If the Host was reinstalled, it must be paired again. Otherwise, check that this is the address of the right Host."
+      "other_host": "This Agent belongs to another Host in Home Assistant. Check the address, or remove the other Host first.",
+      "same_machine_required": "Tick \"It is the same machine\" to go on, or close this dialog.",
+      "unknown": "Unexpected error. Check the Home Assistant log."
     },
     "abort": {
       "already_configured": "This Host is already added.",
       "invalid_discovery_info": "This announcement is not from a Hostbeacon Agent.",
-      "reconfigure_successful": "The address was changed."
+      "reconfigure_successful": "The address was changed.",
+      "reauth_successful": "The Host was Re-paired. It keeps its entities and history.",
+      "cannot_connect": "Cannot log in to the Agent with the new Pairing. Nothing was changed. Make a new Pairing code on the Host and try again."
     }
   },
   "entity": {
@@ -280,6 +309,27 @@
     },
     "release_notes_update_run_off": {
       "message": "Update run is turned off on {host}, so Install is not offered. The Host owner can turn it on in the Agent config."
+    }
+  },
+  "issues": {
+    "certificate_changed": {
+      "title": "Certificate of {host} changed",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Certificate of {host} changed",
+            "description": "The Agent at the address of {host} shows a different certificate, so Home Assistant refuses to connect to it. {host} is Offline.\n\nRe-pair only if the Host was reinstalled, or its key was replaced with `hostbeacon regenerate-key`. Otherwise another machine may be at this address: check the address first.\n\nSelect Submit to start Re-pair."
+          }
+        },
+        "abort": {
+          "repair_started": "Re-pair of {host} started. In Settings > Repairs, select \"Authentication expired for {host}\" to continue.",
+          "host_removed": "This Host is no longer in Home Assistant."
+        }
+      }
+    },
+    "two_machines": {
+      "title": "Two machines share the identity of {host}",
+      "description": "Two machines answered as {host} at the same time. One of them is probably a copy (for example, a cloned VM) that the Agent did not detect. Home Assistant stays connected to the saved address.\n\nOn the copy, run `sudo hostbeacon reset-identity`, then add it as a new Host."
     }
   }
 }

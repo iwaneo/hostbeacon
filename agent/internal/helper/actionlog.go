@@ -21,6 +21,7 @@ const (
 	// A new file each month; files are kept for a year (v1 spec §11).
 	actionLogMonths = 12
 	noHAUser        = "no HA user"
+	maxCopiedFrom   = 64
 )
 
 // ActionLog is the Action log (v1 spec §11): one JSON line per request and
@@ -35,9 +36,9 @@ type ActionLog struct {
 type logEntry struct {
 	Format    int                    `json:"format"`
 	Time      string                 `json:"time"`
-	Entry     string                 `json:"entry"` // request or result
-	ActionID  string                 `json:"action_id"`
-	Action    protocol.Action        `json:"action"`
+	Entry     string                 `json:"entry"` // request, result, or identity_copy
+	ActionID  string                 `json:"action_id,omitempty"`
+	Action    protocol.Action        `json:"action,omitempty"`
 	PairingID string                 `json:"pairing_id,omitempty"`
 	Pairing   string                 `json:"pairing,omitempty"`
 	User      *string                `json:"user,omitempty"`
@@ -45,6 +46,23 @@ type logEntry struct {
 	Reason    protocol.RefusalReason `json:"reason,omitempty"`
 	Result    string                 `json:"result,omitempty"`
 	Error     *string                `json:"error,omitempty"`
+	// Only in an identity_copy line: the new instance ID and the IDs before.
+	InstanceID string   `json:"instance_id,omitempty"`
+	CopiedFrom []string `json:"copied_from,omitempty"`
+}
+
+// LogIdentityCopy writes a line marking that the Agent found it is a copy
+// and made a new identity.
+func (l ActionLog) LogIdentityCopy(copy IdentityCopy) error {
+	if !uuidPattern.MatchString(copy.InstanceID) || len(copy.CopiedFrom) > maxCopiedFrom {
+		return errors.New("invalid identity copy")
+	}
+	for _, id := range copy.CopiedFrom {
+		if !uuidPattern.MatchString(id) {
+			return errors.New("invalid identity copy")
+		}
+	}
+	return l.write(logEntry{Entry: "identity_copy", InstanceID: copy.InstanceID, CopiedFrom: copy.CopiedFrom})
 }
 
 func (l ActionLog) file(month time.Time) string {

@@ -368,6 +368,21 @@ func (p *Pairings) Remove(id string) (Pairing, error) {
 	return removed, err
 }
 
+// RemoveAll deletes every Pairing, pending ones too, and the Pairing code.
+// Their keys stop working at once.
+func (p *Pairings) RemoveAll() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pending = nil
+	return p.update(func(list *pairingList) (bool, error) {
+		if err := os.Remove(filepath.Join(p.dir, codeFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
+		list.Pairings = []pairing{}
+		return true, nil
+	})
+}
+
 // Seen sets the last seen time of the Pairings with these IDs to now. The
 // Agent calls it for Pairings that stay connected.
 func (p *Pairings) Seen(ids []string) error {

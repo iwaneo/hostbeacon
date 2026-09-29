@@ -1,0 +1,15 @@
+{
+  "description": "The Integration's answer to hello, with the Host ID it knows this Agent as (protocol 1.1). The Agent adds it to its known IDs.",
+  "message": {
+    "type": "hello",
+    "id": "ha-1",
+    "kind": "reply",
+    "reply_to": "agent-1",
+    "integration_version": "1.0.0",
+    "protocol_version": "1.1",
+    "protocol_majors": [
+      1
+    ],
+    "host_id": "3f2b8c1e-5d4a-4e6f-9b7c-1a2d3e4f5a6b"
+  }
+}

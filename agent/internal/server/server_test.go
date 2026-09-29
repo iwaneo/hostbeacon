@@ -58,7 +58,7 @@ type agent struct {
 func startAgent(t *testing.T, change func(*Server)) *agent {
 	t.Helper()
 	dir := t.TempDir()
-	id, err := identity.Load(dir)
+	id, _, err := identity.Start(dir, identity.Signals{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +114,10 @@ type homeAssistant struct {
 	agent       *agent
 	fingerprint []byte
 	key         []byte
+	// hostID is sent in the hello reply when set.
+	hostID *string
+	// copiedFrom is what the Pairing answer said.
+	copiedFrom []string
 }
 
 // fetchFingerprint reads the certificate the Agent shows, without trusting it.
@@ -171,7 +175,7 @@ func pair(t *testing.T, a *agent, code string) (*homeAssistant, int) {
 	if answer.InstanceID != a.server.Identity.InstanceID || answer.Hostname != "test-host" {
 		t.Errorf("pair answer = %s, %s; want the instance ID and hostname", answer.InstanceID, answer.Hostname)
 	}
-	return &homeAssistant{agent: a, fingerprint: fingerprint, key: answer.Key}, resp.StatusCode
+	return &homeAssistant{agent: a, fingerprint: fingerprint, key: answer.Key, copiedFrom: answer.CopiedFrom}, resp.StatusCode
 }
 
 func (ha *homeAssistant) dial(t *testing.T, header http.Header) (*websocket.Conn, *http.Response, error) {
@@ -258,7 +262,7 @@ func (ha *homeAssistant) connect(t *testing.T) (*link, *protocol.HelloRequest, *
 	if !ok {
 		t.Fatalf("first message is %T, want hello", message)
 	}
-	reply, err := protocol.Encode(&protocol.HelloReply{ID: "r1", ReplyTo: hello.ID, IntegrationVersion: "0.0.0", ProtocolVersion: "1.0", ProtocolMajors: []int{1}})
+	reply, err := protocol.Encode(&protocol.HelloReply{ID: "r1", ReplyTo: hello.ID, IntegrationVersion: "0.0.0", ProtocolVersion: "1.1", ProtocolMajors: []int{1}, HostID: ha.hostID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,5 +554,41 @@ func TestSnapshotHasEveryGroupAndDeltaOnlyTheChangedOne(t *testing.T) {
 	delta := message.(*protocol.Delta)
 	if delta.Groups.Flags == nil || delta.Groups.Flags.RebootRequired != "yes" || delta.Groups.System != nil || delta.Groups.Disks != nil {
 		t.Errorf("delta = %+v, want only the flags group", delta.Groups)
+	}
+}
+
+func TestPairAnswerHasTheCopiedFromList(t *testing.T) {
+	earlier := identity.NewUUID()
+	a := startAgent(t, func(s *Server) { s.Hello.CopiedFrom = []string{earlier} })
+	ha, status := pair(t, a, a.newCode(t))
+	if status != http.StatusOK {
+		t.Fatalf("pair status = %d", status)
+	}
+	if len(ha.copiedFrom) != 1 || ha.copiedFrom[0] != earlier {
+		t.Errorf("copied_from = %v, want [%s]", ha.copiedFrom, earlier)
+	}
+}
+
+func TestHostIDFromHomeAssistantIsSaved(t *testing.T) {
+	var mu sync.Mutex
+	var saved []string
+	a := startAgent(t, func(s *Server) {
+		s.KnownID = func(id string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			saved = append(saved, id)
+			return nil
+		}
+	})
+	ha, _ := pair(t, a, a.newCode(t))
+	ha.connect(t) // no Host ID: nothing to save
+	hostID := identity.NewUUID()
+	ha.hostID = &hostID
+	ha.connect(t)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(saved) != 1 || saved[0] != hostID {
+		t.Errorf("saved = %v, want [%s]", saved, hostID)
 	}
 }

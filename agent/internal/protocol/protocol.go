@@ -19,7 +19,7 @@ import (
 )
 
 // Version is the protocol version this Agent speaks, as major.minor.
-const Version = "1.0"
+const Version = "1.1"
 
 // Majors lists every protocol major this Agent supports.
 var Majors = []int{1}

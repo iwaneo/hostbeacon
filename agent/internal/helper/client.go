@@ -25,19 +25,25 @@ type Client struct {
 // listed but not read.
 func (c Client) ReadSmart(ctx context.Context) ([]SmartDisk, error) {
 	var disks []SmartDisk
-	return disks, c.call(ctx, JobReadSmart, &disks)
+	return disks, c.call(ctx, request{Job: JobReadSmart}, &disks)
 }
 
 // ReadContainers lists every Docker and Podman container.
 func (c Client) ReadContainers(ctx context.Context) (Containers, error) {
 	var containers Containers
-	return containers, c.call(ctx, JobReadContainers, &containers)
+	return containers, c.call(ctx, request{Job: JobReadContainers}, &containers)
 }
 
 // ReadSMBIOSUUID reads the SMBIOS UUID; nil when the Host has none.
 func (c Client) ReadSMBIOSUUID(ctx context.Context) (*string, error) {
 	var uuid *string
-	return uuid, c.call(ctx, JobReadSMBIOSUUID, &uuid)
+	return uuid, c.call(ctx, request{Job: JobReadSMBIOSUUID}, &uuid)
+}
+
+// LogIdentityCopy writes to the Action log that this Host is a copy.
+func (c Client) LogIdentityCopy(ctx context.Context, copy IdentityCopy) error {
+	var done struct{}
+	return c.call(ctx, request{Job: JobLogIdentityCopy, Copy: &copy}, &done)
 }
 
 // WatchContainers calls changed after each container event, until ctx ends
@@ -97,10 +103,10 @@ func (c Client) Act(ctx context.Context, action ActionRequest) (ack Ack, result 
 	return ack, outcomes, nil
 }
 
-func (c Client) call(ctx context.Context, job string, result any) error {
+func (c Client) call(ctx context.Context, req request, result any) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	conn, err := c.send(ctx, request{Job: job})
+	conn, err := c.send(ctx, req)
 	if err != nil {
 		return err
 	}

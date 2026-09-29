@@ -25,7 +25,7 @@ from typing import (
     get_type_hints,
 )
 
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "1.1"
 PROTOCOL_MAJORS = [1]
 
 Kind = Literal["request", "reply", "event"]
@@ -271,6 +271,8 @@ class HelloReply:
     integration_version: str
     protocol_version: str
     protocol_majors: list[int]
+    # The Host ID Home Assistant knows this Agent as. Since 1.1.
+    host_id: Uuid | None = field(default=None, metadata={"omit_if_none": True})
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,7 +15,7 @@ import dataclasses
 import logging
 import random
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
 
@@ -50,13 +50,14 @@ class Reboot:
     last_boot: str | None
 
 
-def _hello_reply(hello: protocol.HelloRequest) -> protocol.HelloReply:
+def _hello_reply(hello: protocol.HelloRequest, host_id: str | None = None) -> protocol.HelloReply:
     return protocol.HelloReply(
         id=str(uuid.uuid4()),
         reply_to=hello.id,
         integration_version=INTEGRATION_VERSION,
         protocol_version=protocol.PROTOCOL_VERSION,
         protocol_majors=protocol.PROTOCOL_MAJORS,
+        host_id=host_id,
     )
 
 
@@ -92,6 +93,29 @@ async def can_log_in(session: aiohttp.ClientSession, host: str, port: int, finge
         return False
 
 
+async def _messages(ws: aiohttp.ClientWebSocketResponse) -> AsyncIterator[protocol.Message]:
+    """The messages on ws until it closes. Malformed ones are skipped."""
+    async for frame in ws:
+        if frame.type != aiohttp.WSMsgType.TEXT:
+            break
+        try:
+            yield protocol.decode(frame.data)
+        except protocol.ProtocolError:
+            continue
+
+
+async def read_run_id(session: aiohttp.ClientSession, host: str, port: int, fingerprint: bytes, key: bytes) -> str | None:
+    """The run ID of the Agent at host and port, if it has the pinned certificate and accepts the key."""
+    try:
+        async with asyncio.timeout(TIMEOUT), _connect(session, host, port, fingerprint, key) as ws:
+            async for message in _messages(ws):
+                if isinstance(message, protocol.HelloRequest):
+                    return message.run_id
+    except (aiohttp.ClientError, OSError, TimeoutError):
+        pass
+    return None
+
+
 async def remove_pairing(session: aiohttp.ClientSession, host: str, port: int, fingerprint: bytes, key: bytes) -> bool:
     """Ask the Agent to delete this Home Assistant's Pairing.
 
@@ -100,13 +124,7 @@ async def remove_pairing(session: aiohttp.ClientSession, host: str, port: int, f
     request_id = str(uuid.uuid4())
     try:
         async with asyncio.timeout(TIMEOUT), _connect(session, host, port, fingerprint, key) as ws:
-            async for frame in ws:
-                if frame.type != aiohttp.WSMsgType.TEXT:
-                    break
-                try:
-                    message = protocol.decode(frame.data)
-                except protocol.ProtocolError:
-                    continue
+            async for message in _messages(ws):
                 if isinstance(message, protocol.HelloRequest):
                     await ws.send_str(protocol.encode(_hello_reply(message)))
                     await ws.send_str(protocol.encode(protocol.PairingRemoveRequest(id=request_id)))
@@ -123,15 +141,25 @@ class HostConnection:
     """The connection to one Agent and the latest state it sent."""
 
     def __init__(
-        self, session: aiohttp.ClientSession, name: str, host: str, port: int, fingerprint: bytes, key: bytes
+        self,
+        session: aiohttp.ClientSession,
+        name: str,
+        host: str,
+        port: int,
+        fingerprint: bytes,
+        key: bytes,
+        host_id: str | None = None,
     ) -> None:
         self._session = session
         self._name = name
+        # Sent in each hello reply, so the Agent knows the Host ID.
+        self._host_id = host_id
         self._address = (host, port)
         self._fingerprint = fingerprint
         self._key = key
         self._listeners: list[Callable[[], None]] = []
-        self._problem: str | None = None
+        # Why the Agent cannot be used: "certificate" or "key". None when it works.
+        self.problem: str | None = None
         self.online = False
         # The latest hello and state groups. They stay while Offline.
         self.hello: protocol.HelloRequest | None = None
@@ -230,9 +258,10 @@ class HostConnection:
 
     def _report(self, problem: str, message: str) -> None:
         """Log a problem once, not on every retry."""
-        if self._problem != problem:
-            self._problem = problem
+        if self.problem != problem:
+            self.problem = problem
             _LOGGER.error(message, self._name)
+            self._changed()
 
     def _set_offline(self) -> None:
         self.online = False
@@ -268,13 +297,13 @@ class HostConnection:
         match message:
             case protocol.HelloRequest():
                 self.hello = message
-                return _hello_reply(message)
+                return _hello_reply(message, self._host_id)
             case protocol.Snapshot():
                 self.groups = message.groups
                 self.online = True
-                if self._problem is not None:
+                if self.problem is not None:
                     _LOGGER.info("%s is connected again", self._name)
-                self._problem = None
+                self.problem = None
                 self._check_rebooted()
                 self._changed()
             case protocol.Delta():

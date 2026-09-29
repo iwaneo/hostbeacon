@@ -137,7 +137,6 @@ async def test_online_host_stays_on_its_address(
     result = await discover(hass, announcement(other_agent))
     assert result["reason"] == "already_configured"
     assert entry.data[CONF_PORT] == agent.port
-    assert other_agent.requests == []
 
 
 async def reconfigure(hass: HomeAssistant, entry: config_entries.ConfigEntry, port: int):
@@ -164,7 +163,7 @@ async def test_reconfigure_to_the_same_certificate_changes_the_address(
     await wait_for(lambda: state(hass, entry, "host_status") == "online")
 
 
-async def test_reconfigure_to_a_different_certificate_is_refused(
+async def test_reconfigure_to_a_different_certificate_asks_for_re_pair(
     hass: HomeAssistant, agent: FakeAgent, other_agent: FakeAgent
 ) -> None:
     entry = await add_host(hass, agent)
@@ -173,7 +172,7 @@ async def test_reconfigure_to_a_different_certificate_is_refused(
 
     result = await reconfigure(hass, entry, other_agent.port)
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "certificate_changed"}
+    assert result["step_id"] == "reauth_confirm"
     assert dict(entry.data) == old_data
     assert other_agent.requests == []
 

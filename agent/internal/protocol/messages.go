@@ -207,6 +207,8 @@ type HelloReply struct {
 	IntegrationVersion string `json:"integration_version"`
 	ProtocolVersion    string `json:"protocol_version"`
 	ProtocolMajors     []int  `json:"protocol_majors"`
+	// HostID is the Host ID Home Assistant knows this Agent as. Since 1.1.
+	HostID *string `json:"host_id,omitempty" format:"uuid"`
 }
 
 // Snapshot is the full state, sent after hello.

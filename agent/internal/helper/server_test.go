@@ -145,7 +145,7 @@ func TestUnknownJobIsRefused(t *testing.T) {
 	client := start(t, jobs)
 
 	for _, job := range []string{"reboot_now", "", "read_smart\nread_containers", "../read_smart"} {
-		err := client.call(context.Background(), job, new(any))
+		err := client.call(context.Background(), request{Job: job}, new(any))
 		if err == nil || !strings.Contains(err.Error(), "unknown job") {
 			t.Errorf("job %q: error = %v, want unknown job", job, err)
 		}
@@ -264,5 +264,39 @@ func TestActionJobIsRefusedWithoutAConfig(t *testing.T) {
 	}
 	if r.reboots != 0 {
 		t.Error("rebooted")
+	}
+}
+
+func TestIdentityCopyIsWrittenToTheActionLog(t *testing.T) {
+	dir := t.TempDir()
+	r := newRunner(t, dir)
+	client := start(t, newFakeJobs(), func(s *setup) { s.actions = r.ActionRunner })
+
+	if err := client.LogIdentityCopy(context.Background(), IdentityCopy{InstanceID: secondID, CopiedFrom: []string{firstID}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := logEntries(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %v", entries)
+	}
+	entry := entries[0]
+	copiedFrom, _ := entry["copied_from"].([]any)
+	if entry["entry"] != "identity_copy" || entry["instance_id"] != secondID || len(copiedFrom) != 1 || copiedFrom[0] != firstID {
+		t.Errorf("entry = %v", entry)
+	}
+	if _, found := entry["action"]; found {
+		t.Errorf("an identity copy entry has an action: %v", entry)
+	}
+
+	for _, bad := range []IdentityCopy{
+		{InstanceID: "not-a-uuid", CopiedFrom: []string{firstID}},
+		{InstanceID: secondID, CopiedFrom: []string{"x\ny"}},
+	} {
+		if err := client.LogIdentityCopy(context.Background(), bad); err == nil {
+			t.Errorf("%+v: no error", bad)
+		}
+	}
+	if len(logEntries(t, dir)) != 1 {
+		t.Error("an invalid identity copy was logged")
 	}
 }

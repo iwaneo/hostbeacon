@@ -3,7 +3,7 @@
   "$id": "https://github.com/iwaneo/hostbeacon/protocol/schema.json",
   "title": "Hostbeacon Agent-Integration protocol",
   "description": "Every JSON text frame on the WebSocket between the Agent and the Integration. Rules: docs/spec/v1.md section 6. Unknown fields are allowed everywhere and ignored by readers. A message with an unknown type only has to match the envelope.",
-  "x-protocol-version": "1.0",
+  "x-protocol-version": "1.1",
   "$ref": "#/$defs/message",
   "$defs": {
     "message": {
@@ -184,7 +184,11 @@
         "kind": { "const": "reply" },
         "integration_version": { "type": "string" },
         "protocol_version": { "$ref": "#/$defs/protocol_version" },
-        "protocol_majors": { "$ref": "#/$defs/protocol_majors" }
+        "protocol_majors": { "$ref": "#/$defs/protocol_majors" },
+        "host_id": {
+          "$ref": "#/$defs/uuid",
+          "description": "Since 1.1. The Host ID Home Assistant knows this Agent as. The Agent adds it to its known IDs, so a copy can report it in copied_from."
+        }
       }
     },
 
