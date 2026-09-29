@@ -165,6 +165,20 @@ func describe(disks []SmartDisk) []string {
 	return lines
 }
 
+func TestReadSmartSkipsVirtualDisks(t *testing.T) {
+	// A hypervisor's emulated disks answer SMART with made-up values.
+	root := fakeRoot(t, []string{"sda", "nvme0n1", "sdb"}, nil)
+	commands := &fakeCommands{outputs: map[string]string{
+		smartctlCommand("sda"):     strings.Replace(ataSSDJSON, `"rotation_rate":0,`, `"model_name":"QEMU HARDDISK","rotation_rate":0,`, 1),
+		smartctlCommand("nvme0n1"): strings.Replace(nvmeJSON, `"smart_support"`, `"model_name":"QEMU NVMe Ctrl","smart_support"`, 1),
+		smartctlCommand("sdb"):     strings.Replace(ataSSDJSON, `"rotation_rate":0,`, `"model_name":"VBOX HARDDISK","rotation_rate":0,`, 1),
+	}}
+	disks, err := HostJobs{Root: root, Run: commands.run}.ReadSmart(context.Background())
+	if err != nil || len(disks) != 0 {
+		t.Errorf("ReadSmart = %v, %v; want no disks", describe(disks), err)
+	}
+}
+
 func TestReadSmartWithoutSmartctl(t *testing.T) {
 	root := fakeRoot(t, []string{"sda"}, nil)
 	disks, err := HostJobs{Root: root, Run: (&fakeCommands{}).run}.ReadSmart(context.Background())
@@ -236,13 +250,19 @@ func TestReadContainersWithoutEngines(t *testing.T) {
 	}
 }
 
-func TestReadContainersFailsWhenAnEngineFails(t *testing.T) {
+func TestReadContainersWhenAnEngineFails(t *testing.T) {
+	// The Docker daemon is stopped: Docker is still installed, but the
+	// counts are unknown, since they would be wrong.
 	commands := &fakeCommands{
-		outputs: map[string]string{"docker ps": ""},
+		outputs: map[string]string{"docker ps": "", "podman " + psFormat: "fff\tjellyfin\trunning\tUp 2 minutes\n"},
 		errs:    map[string]error{"docker ps": errors.New("exit status 1")},
 	}
-	if _, err := (HostJobs{Run: commands.run}).ReadContainers(context.Background()); err == nil {
-		t.Error("no error while docker cannot list containers: the counts would be wrong")
+	containers, err := HostJobs{Run: commands.run}.ReadContainers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(containers.Engines, []string{"docker", "podman"}) || containers.Error == "" || len(containers.Items) != 0 {
+		t.Errorf("ReadContainers = %+v; want both engines, an error, and no items", containers)
 	}
 }
 

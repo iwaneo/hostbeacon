@@ -84,11 +84,9 @@ func Load(path string) (Config, error) {
 		}
 		c.AllowedSources = append(c.AllowedSources, prefix)
 	}
+	// An Action this release does not know stays off.
 	for _, action := range f.EnabledActions {
-		if !slices.Contains(actions, action) {
-			return Config{}, fmt.Errorf("%s: enabled_actions: unknown Action %q", path, action)
-		}
-		if !slices.Contains(c.EnabledActions, action) {
+		if slices.Contains(actions, action) && !slices.Contains(c.EnabledActions, action) {
 			c.EnabledActions = append(c.EnabledActions, action)
 		}
 	}
@@ -115,11 +113,6 @@ func LoadRootOwned(path string) (Config, error) {
 		}
 	}
 	return Load(path)
-}
-
-// Enabled says whether the owner turned action on.
-func (c Config) Enabled(action protocol.Action) bool {
-	return slices.Contains(c.EnabledActions, action)
 }
 
 // parseSource reads a range such as 10.0.0.0/8, or a single address.

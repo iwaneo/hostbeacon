@@ -34,13 +34,13 @@ func main() {
 		return
 	}
 	var err error
-	switch command, args := os.Args[1], os.Args[2:]; command {
+	switch name, args := os.Args[1], os.Args[2:]; name {
 	case "serve":
 		err = serve(args)
 	case "version", "--version":
 		fmt.Println(version.String())
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n%s", command, usage)
+		fmt.Fprintf(os.Stderr, "unknown command %q\n%s", name, usage)
 		os.Exit(2)
 	}
 	if err != nil {

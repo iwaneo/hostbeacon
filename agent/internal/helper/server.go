@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -67,7 +66,8 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		select {
 		case slots <- struct{}{}:
 		default:
-			writeReply(conn, reply{Error: "busy: too many requests at once"})
+			// Too many requests at once. Nothing is written, since the
+			// caller is not checked yet.
 			conn.Close()
 			continue
 		}
@@ -82,11 +82,11 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 }
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	unix, ok := conn.(*net.UnixConn)
+	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
 		return
 	}
-	if uid, err := peerUID(unix); err != nil || uid != s.AllowedUID {
+	if uid, err := peerUID(unixConn); err != nil || uid != s.AllowedUID {
 		s.Log.Warn("refused a caller that is not the Agent user", "uid", uid, "error", err)
 		writeReply(conn, reply{Error: "not allowed: only the Agent user may use the helper"})
 		return
@@ -170,12 +170,4 @@ func writeReply(conn net.Conn, r reply) error {
 	data, _ := json.Marshal(r)
 	_, err := conn.Write(append(data, '\n'))
 	return err
-}
-
-// errorFromReply turns a reply's error text into an error.
-func errorFromReply(r reply) error {
-	if r.Error != "" {
-		return errors.New("helper: " + r.Error)
-	}
-	return nil
 }

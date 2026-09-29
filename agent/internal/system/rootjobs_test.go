@@ -90,6 +90,8 @@ func smartDisk(device string, health string, temperature, wear float64) helper.S
 func TestSmartAndContainersOnlyWithTheHelper(t *testing.T) {
 	withDisks := newFakeHelper()
 	withDisks.disks = []helper.SmartDisk{smartDisk("sda", "ok", 30, 1)}
+	dockerStopped := newFakeHelper()
+	dockerStopped.containers.Error = "docker cannot list its containers"
 	noEngine := newFakeHelper()
 	noEngine.containers.Engines = []string{}
 	broken := newFakeHelper()
@@ -107,6 +109,7 @@ func TestSmartAndContainersOnlyWithTheHelper(t *testing.T) {
 		{"a VM without real disks", "kvm", newFakeHelper(), false, true},
 		{"LXC hides SMART", "lxc", withDisks, false, true},
 		{"no container engine", "none", noEngine, false, false},
+		{"Docker installed but stopped", "none", dockerStopped, false, true},
 		{"helper not reachable", "none", broken, false, false},
 		{"no helper", "none", nil, false, false},
 	} {
@@ -280,9 +283,15 @@ func TestContainersCapAndError(t *testing.T) {
 		t.Errorf("the group breaks the protocol: %v", err)
 	}
 
-	fake.set(func(f *fakeHelper) { f.containersErr = errors.New("docker is not running") })
+	fake.set(func(f *fakeHelper) { f.containersErr = errors.New("the helper is down") })
 	fake.events <- struct{}{}
 	waitFor(t, func() bool { return len(published()) == 2 })
+	fake.set(func(f *fakeHelper) { f.containersErr = nil; f.containers.Error = "docker is not running" })
+	fake.events <- struct{}{}
+	waitFor(t, func() bool { return len(published()) == 3 })
+	if group := published()[2]; group.Count != nil || len(group.Items) != 0 {
+		t.Errorf("with an engine error = %+v, want null counts", group)
+	}
 	if group := published()[1]; group.Count != nil || group.Running != nil || group.Stopped != nil || group.Unhealthy != nil || group.Items == nil || len(group.Items) != 0 {
 		t.Errorf("after an error = %+v, want null counts and an empty list", group)
 	}

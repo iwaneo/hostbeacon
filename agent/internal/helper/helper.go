@@ -46,10 +46,12 @@ type Container struct {
 }
 
 // Containers lists every container. Engines names the container engines
-// found on the Host; without one there are no container sensors.
+// found on the Host; without one there are no container sensors. Error says
+// why an engine could not list its containers; the list is then empty.
 type Containers struct {
 	Engines []string    `json:"engines"`
 	Items   []Container `json:"items"`
+	Error   string      `json:"error,omitempty"`
 }
 
 type request struct {

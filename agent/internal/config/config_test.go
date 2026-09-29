@@ -73,11 +73,20 @@ func TestOwnerCanEnableActionsAndTurnOffRefresh(t *testing.T) {
 	if !slices.Equal(c.EnabledActions, []protocol.Action{protocol.ActionReboot, protocol.ActionAgentUpdate}) {
 		t.Errorf("enabled actions = %v", c.EnabledActions)
 	}
-	if !c.Enabled(protocol.ActionReboot) || c.Enabled(protocol.ActionUpdateRun) {
-		t.Error("Enabled does not follow the list")
-	}
 	if c.PackageListRefresh {
 		t.Error("package list refresh is on, want off")
+	}
+}
+
+func TestActionFromALaterReleaseIsNotEnabled(t *testing.T) {
+	// After a rollback, the config may name an Action this release does not
+	// know. It stays off, and the rest of the config still works.
+	c, err := load(t, `{"format": 1, "enabled_actions": ["reboot", "shutdown"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.EnabledActions, []protocol.Action{protocol.ActionReboot}) {
+		t.Errorf("enabled actions = %v, want only reboot", c.EnabledActions)
 	}
 }
 
@@ -122,7 +131,6 @@ func TestConfigThatCannotBeReadFailsClosed(t *testing.T) {
 		"unknown format": `{"format": 2}`,
 		"bad address":    `{"format": 1, "allowed_sources": ["everyone"]}`,
 		"bad port":       `{"format": 1, "port": 70000}`,
-		"unknown action": `{"format": 1, "enabled_actions": ["shutdown"]}`,
 		"refresh text":   `{"format": 1, "package_list_refresh": "no"}`,
 	} {
 		if _, err := load(t, content); err == nil {

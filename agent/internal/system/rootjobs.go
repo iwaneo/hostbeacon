@@ -99,7 +99,7 @@ func WatchContainers(ctx context.Context, rootHelper RootHelper, minGap, fullEve
 // containersGroup counts every container and caps the list. An error gives
 // unknown counts.
 func containersGroup(containers helper.Containers, err error) protocol.Containers {
-	if err != nil {
+	if err != nil || containers.Error != "" {
 		return protocol.Containers{Items: []protocol.Container{}}
 	}
 	var running, stopped, unhealthy int64

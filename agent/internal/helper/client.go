@@ -125,3 +125,11 @@ func readReply(lines *bufio.Reader) (reply, error) {
 	}
 	return r, nil
 }
+
+// errorFromReply turns a reply's error text into an error.
+func errorFromReply(r reply) error {
+	if r.Error != "" {
+		return errors.New("helper: " + r.Error)
+	}
+	return nil
+}

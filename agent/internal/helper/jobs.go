@@ -31,7 +31,9 @@ var (
 	// multipath paths (nvme0c0n1) are left out as well; their namespace
 	// (nvme0n1) is read instead.
 	virtualDevices = regexp.MustCompile(`^(loop|ram|zram|dm-|md|sr|fd|nbd|rbd|drbd|zd|bcache|mmcblk|nullb|pmem)|^nvme[0-9]+c[0-9]+n`)
-	uuidPattern    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	// virtualModels are disks a hypervisor emulates; their SMART is made up.
+	virtualModels = regexp.MustCompile(`(?i)^(QEMU|VBOX|VMware|Virtual disk|Msft Virtual)`)
+	uuidPattern   = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 // ReadSmart reads SMART from each physical disk with smartctl. It never
@@ -75,7 +77,9 @@ type smartctlOutput struct {
 	Device struct {
 		Protocol string `json:"protocol"`
 	} `json:"device"`
-	RotationRate *int `json:"rotation_rate"`
+	ModelName    string `json:"model_name"`
+	ScsiModel    string `json:"scsi_model_name"`
+	RotationRate *int   `json:"rotation_rate"`
 	SmartSupport *struct {
 		Available bool `json:"available"`
 	} `json:"smart_support"`
@@ -119,6 +123,9 @@ func parseSmartctl(device string, out []byte) (disk SmartDisk, ok bool) {
 		}
 	}
 	if (s.SmartSupport == nil || !s.SmartSupport.Available) && s.Device.Protocol != "NVMe" {
+		return SmartDisk{}, false
+	}
+	if virtualModels.MatchString(s.ModelName) || virtualModels.MatchString(s.ScsiModel) {
 		return SmartDisk{}, false
 	}
 	if s.SmartStatus != nil {
@@ -174,10 +181,13 @@ func (h HostJobs) ReadContainers(ctx context.Context) (Containers, error) {
 		if errors.Is(err, exec.ErrNotFound) {
 			continue
 		}
-		if err != nil {
-			return Containers{}, fmt.Errorf("%s cannot list its containers: %w", engine, err)
-		}
 		result.Engines = append(result.Engines, engine)
+		if err != nil {
+			// For example, the Docker daemon is stopped. Counts without
+			// this engine would be wrong.
+			result.Error = fmt.Sprintf("%s cannot list its containers: %v", engine, err)
+			continue
+		}
 		for line := range strings.Lines(string(out)) {
 			fields := strings.Split(strings.TrimRight(line, "\n"), "\t")
 			// Docker behind a podman-docker shim lists the same containers.
@@ -188,6 +198,9 @@ func (h HostJobs) ReadContainers(ctx context.Context) (Containers, error) {
 			name, _, _ := strings.Cut(fields[1], ",")
 			result.Items = append(result.Items, Container{Name: name, State: containerState(fields[2], fields[3])})
 		}
+	}
+	if result.Error != "" {
+		result.Items = []Container{}
 	}
 	slices.SortFunc(result.Items, func(a, b Container) int { return cmp.Compare(a.Name, b.Name) })
 	return result, nil
