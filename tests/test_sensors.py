@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import timedelta
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -16,7 +17,16 @@ from custom_components.hostbeacon.const import DOMAIN
 from .fake_agent import FakeAgent, flags, system
 from .test_host import add_host, entity_id, state, wait_for
 
-ALL_CAPABILITIES = ["load", "temperatures", "disks", "network", "failed_services", "available_updates"]
+ALL_CAPABILITIES = [
+    "load",
+    "temperatures",
+    "disks",
+    "network",
+    "failed_services",
+    "available_updates",
+    "containers",
+    "smart",
+]
 
 ROOT = protocol.Mount(mount="/", used_percent=74.0, free_bytes=25_000_000_000, total_bytes=100_000_000_000)
 ETH0 = protocol.Interface(
@@ -27,6 +37,21 @@ ETH0 = protocol.Interface(
     tx_bytes_total=5_000,
 )
 PACKAGE = protocol.Package(name="bash", installed_version="5.2.37-2", new_version="5.2.37-2+b5")
+CONTAINERS = protocol.Containers(
+    count=4,
+    running=2,
+    stopped=1,
+    unhealthy=1,
+    items=[
+        protocol.Container(name="jellyfin", state="running"),
+        protocol.Container(name="old-db", state="stopped"),
+        protocol.Container(name="paperless", state="unhealthy"),
+        protocol.Container(name="web", state="running"),
+    ],
+)
+NVME = protocol.SmartDisk(device="nvme0n1", health="ok", temperature_celsius=39.0, wear_percent=4.0)
+# An HDD has no wear.
+HDD = protocol.SmartDisk(device="sda", health="failing", temperature_celsius=44.0, wear_percent=None)
 
 CAPABILITY_KEYS = {
     "load": ["load_1", "load_5", "load_15"],
@@ -35,6 +60,14 @@ CAPABILITY_KEYS = {
     "network": ["download_eth0", "upload_eth0", "downloaded_eth0", "uploaded_eth0"],
     "failed_services": ["failed_services"],
     "available_updates": ["available_updates"],
+    "containers": ["containers_running", "containers_stopped", "containers_unhealthy"],
+    "smart": [
+        "disk_health_nvme0n1",
+        "disk_temperature_nvme0n1",
+        "disk_wear_nvme0n1",
+        "disk_health_sda",
+        "disk_temperature_sda",
+    ],
 }
 ALWAYS_KEYS = [
     "host_status",
@@ -73,13 +106,23 @@ def full_host(agent: FakeAgent, capabilities: list[str] = ALL_CAPABILITIES) -> N
         temperatures=protocol.Temperatures(cpu_celsius=52.0),
         failed_services=protocol.NameList(count=2, names=["a.service", "b.service"]),
         available_updates=protocol.AvailableUpdates(count=1, packages=[PACKAGE], fingerprint="ab" * 32, last_refresh=None),
+        containers=CONTAINERS,
+        smart=protocol.Smart(disks=[NVME, HDD]),
     )
 
 
 def registered(hass: HomeAssistant, host_id: str, key: str) -> er.RegistryEntry | None:
     registry = er.async_get(hass)
-    found = registry.async_get_entity_id("sensor", DOMAIN, f"{host_id}_{key}")
+    found = registry.async_get_entity_id("sensor", DOMAIN, f"{host_id}_{key}") or registry.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{host_id}_{key}"
+    )
     return registry.async_get(found) if found else None
+
+
+def binary_state(hass: HomeAssistant, entry: ConfigEntry, key: str) -> State:
+    found = er.async_get(hass).async_get_entity_id("binary_sensor", DOMAIN, f"{entry.unique_id}_{key}")
+    assert found, key
+    return hass.states.get(found)
 
 
 def enable_before_adding(hass: HomeAssistant, agent: FakeAgent, *keys: str) -> None:
@@ -218,3 +261,65 @@ async def test_service_names_are_not_recorded(hass: HomeAssistant, agent: FakeAg
     for current in hass.states.async_all("sensor"):
         if current.entity_id != services.entity_id:
             assert "services" not in current.attributes
+
+
+async def test_smart_sensors(hass: HomeAssistant, agent: FakeAgent) -> None:
+    full_host(agent)
+    entry = await add_host(hass, agent)
+
+    # Health is a problem sensor: on means the disk is failing.
+    nvme_health = binary_state(hass, entry, "disk_health_nvme0n1")
+    assert nvme_health.state == "off"
+    assert nvme_health.attributes["device_class"] == "problem"
+    assert nvme_health.attributes["friendly_name"] == "test-host Disk nvme0n1 health"
+    assert binary_state(hass, entry, "disk_health_sda").state == "on"
+
+    temperature = hass.states.get(entity_id(hass, entry, "disk_temperature_sda"))
+    assert float(temperature.state) == 44
+    assert temperature.attributes["unit_of_measurement"] == "°C"
+    assert temperature.attributes["friendly_name"] == "test-host Disk sda temperature"
+    wear = hass.states.get(entity_id(hass, entry, "disk_wear_nvme0n1"))
+    assert float(wear.state) == 4
+    assert wear.attributes["unit_of_measurement"] == "%"
+    assert wear.attributes["friendly_name"] == "test-host Disk nvme0n1 wear"
+    # Wear only for SSDs.
+    assert registered(hass, entry.unique_id, "disk_wear_sda") is None
+
+    # A disk whose health is not known yet (it slept since the Agent started).
+    unknown = protocol.SmartDisk(device="sdb", health=None, temperature_celsius=None, wear_percent=None)
+    await agent.send_groups(protocol.Groups(smart=protocol.Smart(disks=[NVME, unknown])))
+    await wait_for(lambda: registered(hass, entry.unique_id, "disk_health_sdb") is not None)
+    await wait_for(lambda: binary_state(hass, entry, "disk_health_sdb").state == STATE_UNKNOWN)
+    assert state(hass, entry, "disk_temperature_sdb") == STATE_UNKNOWN
+    # sda is gone from the group.
+    assert binary_state(hass, entry, "disk_health_sda").state == STATE_UNAVAILABLE
+    assert state(hass, entry, "disk_temperature_sda") == STATE_UNAVAILABLE
+
+
+async def test_container_sensors(hass: HomeAssistant, agent: FakeAgent) -> None:
+    full_host(agent)
+    entry = await add_host(hass, agent)
+
+    running = hass.states.get(entity_id(hass, entry, "containers_running"))
+    assert running.state == "2"
+    assert running.attributes["friendly_name"] == "test-host Containers running"
+    assert running.attributes["containers"] == ["jellyfin", "web"]
+    assert state(hass, entry, "containers_stopped") == "1"
+    unhealthy = hass.states.get(entity_id(hass, entry, "containers_unhealthy"))
+    assert unhealthy.state == "1"
+    assert unhealthy.attributes["containers"] == ["paperless"]
+
+    # Unknown counts while the Host cannot read its containers.
+    unknown = protocol.Containers(count=None, running=None, stopped=None, unhealthy=None, items=[])
+    await agent.send_groups(protocol.Groups(containers=unknown))
+    await wait_for(lambda: state(hass, entry, "containers_running") == STATE_UNKNOWN)
+
+
+async def test_container_names_are_not_recorded(hass: HomeAssistant, agent: FakeAgent) -> None:
+    """HA history keeps container counts, never their names (v1 spec §7.4)."""
+    full_host(agent)
+    entry = await add_host(hass, agent)
+    for key in CAPABILITY_KEYS["containers"]:
+        current = hass.states.get(entity_id(hass, entry, key))
+        assert "containers" in current.attributes
+        assert "containers" in current.state_info["unrecorded_attributes"], key

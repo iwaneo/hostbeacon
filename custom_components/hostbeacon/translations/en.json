@@ -34,6 +34,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "disk_health": {
+        "name": "Disk {device} health"
+      }
+    },
     "sensor": {
       "host_status": {
         "name": "Host status",
@@ -93,6 +98,36 @@
             "name": "Services"
           }
         }
+      },
+      "containers_running": {
+        "name": "Containers running",
+        "state_attributes": {
+          "containers": {
+            "name": "Containers"
+          }
+        }
+      },
+      "containers_stopped": {
+        "name": "Containers stopped",
+        "state_attributes": {
+          "containers": {
+            "name": "Containers"
+          }
+        }
+      },
+      "containers_unhealthy": {
+        "name": "Containers unhealthy",
+        "state_attributes": {
+          "containers": {
+            "name": "Containers"
+          }
+        }
+      },
+      "disk_temperature": {
+        "name": "Disk {device} temperature"
+      },
+      "disk_wear": {
+        "name": "Disk {device} wear"
       },
       "reboot_required": {
         "name": "Reboot required",
