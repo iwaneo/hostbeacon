@@ -193,7 +193,8 @@ class HomeAssistant:
         subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True)
 
     def logs(self) -> str:
-        return subprocess.run(["docker", "logs", CONTAINER], capture_output=True, text=True).stderr
+        logs = subprocess.run(["docker", "logs", CONTAINER], capture_output=True, text=True)
+        return logs.stdout + logs.stderr
 
     def cpu_seconds(self) -> float:
         """CPU time the container has used, from its cgroup."""
@@ -319,8 +320,14 @@ async def run(args: argparse.Namespace) -> bool:
     for line in errors[:20]:
         print("Log:", line)
     ok = True
-    if states.count("loaded") != args.agents or connected != args.agents or current != args.agents:
+    if states.count("loaded") != args.agents:
+        print(f"FAIL: {states.count('loaded')} of {args.agents} config entries loaded")
+        ok = False
+    if connected != args.agents:
         print(f"FAIL: {connected} of {args.agents} Agents connected")
+        ok = False
+    if current != args.agents:
+        print(f"FAIL: {current} of {args.agents} Hosts show the last CPU usage sent")
         ok = False
     if errors:
         print(f"FAIL: {len(errors)} Hostbeacon errors or warnings in the Home Assistant log")

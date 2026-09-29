@@ -54,7 +54,7 @@ max_kb=0
 sum_kb=0
 samples=0
 while :; do
-	[ "$(pids)" = "$start_pids" ] || fail "the Agent restarted during the check"
+	[ "$(pids)" = "$start_pids" ] || fail "the Agent stopped or restarted during the check"
 	kb=$(rss_kb "$start_pids")
 	[ "$kb" -gt "$max_kb" ] && max_kb=$kb
 	sum_kb=$((sum_kb + kb))
