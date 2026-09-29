@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/config"
+	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
 )
 
 // fakeJobs records which jobs ran.
@@ -71,6 +72,7 @@ func (f *fakeJobs) ReadSMBIOSUUID(context.Context) (*string, error) {
 type setup struct {
 	uid        int
 	loadConfig func() (config.Config, error)
+	actions    *ActionRunner
 }
 
 // start runs a helper on a real socket and returns a client for it. By
@@ -94,7 +96,7 @@ func start(t *testing.T, jobs Jobs, options ...func(*setup)) Client {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	server := &Server{AllowedUID: s.uid, LoadConfig: s.loadConfig, Jobs: jobs}
+	server := &Server{AllowedUID: s.uid, LoadConfig: s.loadConfig, Jobs: jobs, Actions: s.actions}
 	go func() {
 		defer close(done)
 		server.Serve(ctx, listener)
@@ -205,5 +207,62 @@ func TestWatchSendsChangesUntilTheCallerLeaves(t *testing.T) {
 	case <-jobs.stopped:
 	case <-time.After(5 * time.Second):
 		t.Error("the watch job kept running after the caller left")
+	}
+}
+
+func TestActionJobAnswersTheAckThenTheResult(t *testing.T) {
+	r := newRunner(t, t.TempDir())
+	client := start(t, newFakeJobs(), func(s *setup) {
+		s.actions = r.ActionRunner
+		s.loadConfig = func() (config.Config, error) { return rebootEnabled, nil }
+	})
+
+	ack, result, err := client.Act(context.Background(), rebootRequest(firstID))
+	if err != nil || ack.Status != "accepted" {
+		t.Fatalf("Act = %+v, %v", ack, err)
+	}
+	select {
+	case outcome, ok := <-result:
+		if !ok || outcome.Result != "ok" {
+			t.Errorf("result = %+v, %v", outcome, ok)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no result")
+	}
+	if r.reboots != 1 {
+		t.Errorf("reboots = %d", r.reboots)
+	}
+
+	ack, result, err = client.Act(context.Background(), rebootRequest(firstID))
+	if err != nil || ack.Status != "refused" || *ack.Reason != protocol.ReasonDuplicate || ack.FirstResult.Result != "ok" || result != nil {
+		t.Errorf("repeat: %+v, %v, %v", ack, result, err)
+	}
+}
+
+func TestActionJobUsesTheConfigOfEachRequest(t *testing.T) {
+	r := newRunner(t, t.TempDir())
+	client := start(t, newFakeJobs(), func(s *setup) {
+		s.actions = r.ActionRunner
+		s.loadConfig = func() (config.Config, error) { return config.Config{}, nil }
+	})
+
+	ack, result, err := client.Act(context.Background(), rebootRequest(firstID))
+	if err != nil || ack.Status != "refused" || *ack.Reason != protocol.ReasonDisabled || result != nil {
+		t.Errorf("Act = %+v, %v, %v", ack, result, err)
+	}
+}
+
+func TestActionJobIsRefusedWithoutAConfig(t *testing.T) {
+	r := newRunner(t, t.TempDir())
+	client := start(t, newFakeJobs(), func(s *setup) {
+		s.actions = r.ActionRunner
+		s.loadConfig = func() (config.Config, error) { return config.Config{}, errors.New("permission denied") }
+	})
+
+	if _, _, err := client.Act(context.Background(), rebootRequest(firstID)); err == nil {
+		t.Error("no error")
+	}
+	if r.reboots != 0 {
+		t.Error("rebooted")
 	}
 }

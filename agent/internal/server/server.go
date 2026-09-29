@@ -25,6 +25,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/config"
+	"github.com/iwaneo/hostbeacon/agent/internal/helper"
 	"github.com/iwaneo/hostbeacon/agent/internal/identity"
 	"github.com/iwaneo/hostbeacon/agent/internal/pairing"
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
@@ -54,7 +55,10 @@ type Server struct {
 	// Hello is sent after login. Serve fills in the message ID and the
 	// protocol version.
 	Hello protocol.HelloRequest
-	Log   *slog.Logger
+	// Actions passes Action requests to the root helper, which checks, logs,
+	// and runs them. Without it, every Action is refused.
+	Actions Actions
+	Log     *slog.Logger
 
 	// Limits for connections that have not logged in with a key. Zero means
 	// the default.
@@ -73,6 +77,11 @@ type Server struct {
 	LastSeenInterval time.Duration
 
 	sessions *sessions
+}
+
+// Actions is the root helper's Action job.
+type Actions interface {
+	Act(ctx context.Context, request helper.ActionRequest) (helper.Ack, <-chan protocol.ActionOutcome, error)
 }
 
 type connKey struct{}
@@ -363,6 +372,8 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn, login pairing.Pai
 			}
 		case *protocol.PairingRemoveRequest:
 			return s.removePairing(ctx, ws, login, m)
+		case *protocol.ActionRequest:
+			go s.action(ctx, ws, login, m)
 		case *protocol.Unknown:
 			if reply, ok := protocol.UnsupportedReply(m, identity.NewUUID()); ok {
 				if err := send(ctx, ws, reply); err != nil {
@@ -372,6 +383,50 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn, login pairing.Pai
 		}
 	}
 }
+
+// action passes an Action request to the root helper and sends its Ack, then
+// the result of an accepted Action. When the helper cannot be asked, nothing
+// is logged, so the Action is refused as cannot_log.
+func (s *Server) action(ctx context.Context, ws *websocket.Conn, login pairing.Pairing, request *protocol.ActionRequest) {
+	ack := helper.Ack{Status: "refused", Reason: ptr(protocol.ReasonCannotLog)}
+	var result <-chan protocol.ActionOutcome
+	if s.Actions == nil {
+		s.Log.Error("refused an Action: the root helper is not set up", "action", request.Action)
+	} else {
+		answer, outcomes, err := s.Actions.Act(ctx, helper.ActionRequest{
+			ActionID:    request.ActionID,
+			Action:      request.Action,
+			PairingID:   login.ID,
+			PairingName: login.Name,
+			User:        request.User,
+		})
+		if err != nil {
+			s.Log.Error("refused an Action: cannot ask the root helper", "action", request.Action, "error", err)
+		} else {
+			ack, result = answer, outcomes
+		}
+	}
+	s.Log.Info("Action request", "action", request.Action, "action_id", request.ActionID, "pairing", login.Name, "status", ack.Status, "reason", ack.Reason)
+	if err := send(ctx, ws, &protocol.ActionAck{
+		ID:          identity.NewUUID(),
+		ReplyTo:     request.ID,
+		ActionID:    request.ActionID,
+		Status:      ack.Status,
+		Reason:      ack.Reason,
+		FirstResult: ack.FirstResult,
+	}); err != nil || result == nil {
+		return
+	}
+	select {
+	case <-ctx.Done():
+	case outcome, ok := <-result:
+		if ok {
+			send(ctx, ws, &protocol.ActionResult{ID: identity.NewUUID(), ActionID: request.ActionID, Action: request.Action, Result: outcome.Result, Error: outcome.Error})
+		}
+	}
+}
+
+func ptr[T any](value T) *T { return &value }
 
 // removePairing deletes the Pairing this connection logged in with, confirms
 // it, and closes every connection of that Pairing. Other Pairings go on.

@@ -354,7 +354,7 @@ class HostStatusSensor(HostEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        return "online" if self._connection.online else "offline"
+        return self._connection.host_status
 
 
 class LastSeenSensor(HostEntity, SensorEntity):

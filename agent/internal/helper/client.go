@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net"
 	"time"
+
+	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
 )
 
 const (
@@ -41,7 +43,7 @@ func (c Client) ReadSMBIOSUUID(ctx context.Context) (*string, error) {
 // WatchContainers calls changed after each container event, until ctx ends
 // or the helper stops the watch.
 func (c Client) WatchContainers(ctx context.Context, changed func()) error {
-	conn, err := c.send(ctx, JobWatchContainers)
+	conn, err := c.send(ctx, request{Job: JobWatchContainers})
 	if err != nil {
 		return err
 	}
@@ -64,17 +66,53 @@ func (c Client) WatchContainers(ctx context.Context, changed func()) error {
 	}
 }
 
+// Act asks the helper to run an Action. When the helper accepts it, result
+// gets the Action's result later; it closes without one when the result
+// cannot be read (for example, the Host is already shutting down).
+func (c Client) Act(ctx context.Context, action ActionRequest) (ack Ack, result <-chan protocol.ActionOutcome, err error) {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	conn, err := c.send(ctx, request{Job: JobAction, Action: &action})
+	if err != nil {
+		cancel()
+		return Ack{}, nil, err
+	}
+	deadline, _ := ctx.Deadline()
+	conn.SetReadDeadline(deadline)
+	lines := bufio.NewReader(conn)
+	if err := readResult(lines, &ack); err != nil || ack.Status != "accepted" {
+		cancel()
+		conn.Close()
+		return ack, nil, err
+	}
+	outcomes := make(chan protocol.ActionOutcome, 1)
+	go func() {
+		defer cancel()
+		defer conn.Close()
+		defer close(outcomes)
+		var outcome protocol.ActionOutcome
+		if readResult(lines, &outcome) == nil {
+			outcomes <- outcome
+		}
+	}()
+	return ack, outcomes, nil
+}
+
 func (c Client) call(ctx context.Context, job string, result any) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	conn, err := c.send(ctx, job)
+	conn, err := c.send(ctx, request{Job: job})
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 	deadline, _ := ctx.Deadline()
 	conn.SetReadDeadline(deadline)
-	r, err := readReply(bufio.NewReader(conn))
+	return readResult(bufio.NewReader(conn), result)
+}
+
+// readResult reads one reply line into result.
+func readResult(lines *bufio.Reader, result any) error {
+	r, err := readReply(lines)
 	if err != nil {
 		return err
 	}
@@ -84,13 +122,13 @@ func (c Client) call(ctx context.Context, job string, result any) error {
 	return json.Unmarshal(r.Result, result)
 }
 
-func (c Client) send(ctx context.Context, job string) (net.Conn, error) {
+func (c Client) send(ctx context.Context, req request) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.Socket)
 	if err != nil {
 		return nil, err
 	}
-	data, _ := json.Marshal(request{Job: job})
+	data, _ := json.Marshal(req)
 	conn.SetWriteDeadline(time.Now().Add(requestTimeout))
 	if _, err := conn.Write(append(data, '\n')); err != nil {
 		// A refused caller may be closed before it writes; its reply says why.

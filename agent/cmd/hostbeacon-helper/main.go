@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/command"
 	"github.com/iwaneo/hostbeacon/agent/internal/config"
@@ -54,6 +55,7 @@ func serve(args []string) error {
 	configPath := flags.String("config", config.DefaultPath, "the Host config file")
 	socket := flags.String("socket", helper.DefaultSocket, "the socket the network part connects to")
 	agentUser := flags.String("user", "hostbeacon", "the user the network part runs as; no other user may connect")
+	actionLog := flags.String("action-log", helper.DefaultActionLogDir, "the Action log directory")
 	flags.Parse(args)
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
@@ -85,11 +87,24 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	env := []string{"LANG=C", "LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
+	run := command.Exec(env)
 	server := &helper.Server{
 		AllowedUID: uid,
 		LoadConfig: loadConfig,
-		Jobs:       helper.HostJobs{Root: "/", Run: command.Exec(env), Stream: command.ExecStream(env)},
-		Log:        log,
+		Jobs:       helper.HostJobs{Root: "/", Run: run, Stream: command.ExecStream(env)},
+		Actions: &helper.ActionRunner{
+			Log:                 helper.ActionLog{Dir: *actionLog, Now: time.Now},
+			Journal:             log,
+			Uptime:              func() (time.Duration, error) { return helper.ReadUptime("/") },
+			PackageTaskLock:     helper.DefaultPackageTaskLock,
+			PackageManagerLocks: helper.DefaultPackageManagerLocks,
+			// An orderly reboot, with no delay (v1 spec §9).
+			Reboot: func(ctx context.Context) error {
+				_, err := run(ctx, "systemctl", "reboot")
+				return err
+			},
+		},
+		Log: log,
 	}
 	log.Info("listening", "socket", *socket, "user", *agentUser)
 	return server.Serve(ctx, listener)
