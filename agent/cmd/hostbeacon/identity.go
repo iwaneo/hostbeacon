@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -84,12 +85,20 @@ func signalNames(names []string) string {
 
 // holdAdvice says why the Agent is in identity hold and what to run.
 func holdAdvice(missing []string) string {
-	return fmt.Sprintf(`The Agent is in identity hold: it accepts no connections, because it cannot
+	advice := fmt.Sprintf(`The Agent is in identity hold: it accepts no connections, because it cannot
 read %s, which it read at install.
+`, signalNames(missing))
+	if slices.Contains(missing, identity.SignalSMBIOSUUID) {
+		advice += `The Agent reads the SMBIOS UUID through the root helper. If the helper is
+not running, start it and restart the Agent:
+  sudo systemctl restart hostbeacon-helper hostbeacon
+`
+	}
+	return advice + `Otherwise:
   If this is the same machine:               sudo hostbeacon keep-identity
   If the signal is gone for good:            sudo hostbeacon keep-identity --drop-missing
   If this machine is a copy of another Host: sudo hostbeacon reset-identity
-`, signalNames(missing))
+`
 }
 
 const bestEffort = `Clone detection is best effort. If the Agent does not see that it is a copy,

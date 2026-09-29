@@ -218,7 +218,7 @@ func serve(args []string) error {
 			log.Error("cannot write the identity copy to the Action log", "error", err)
 		}
 	case identity.Hold:
-		log.Error(strings.ReplaceAll(holdAdvice(check.Missing), "\n", " ") + "Then restart the Agent.")
+		log.Error("identity hold: the Agent accepts no connections, because it cannot read an identity signal it read at install; run `sudo hostbeacon status` to see what to do", "signals", check.Missing)
 		<-ctx.Done()
 		return nil
 	}
