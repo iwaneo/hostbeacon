@@ -1,0 +1,141 @@
+name: Release
+
+# Makes a release from a v<major>.<minor>.<patch> tag on main, after the owner
+# approves the release environment (v1 spec §10): the .deb, .rpm, and tarball
+# for amd64 and arm64, SHA256SUMS signed with minisign, and GitHub
+# attestations. The Agent trusts a release only by that signature.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check the tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag is a release version on main
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=${TAG#v}
+          if ! printf '%s\n' "$version" | grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'; then
+            echo "::error::$TAG is not v<major>.<minor>.<patch>"
+            exit 1
+          fi
+          # Tag rulesets cannot require that a tag is on main, so this checks it.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG is not on main"
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          # No cache: a release is built from a clean module download.
+          cache: false
+      - name: Test
+        run: go test ./...
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+      - name: Build the .deb, .rpm, and tarball
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: packaging/build.sh "$VERSION" "$ARCH" ../packages
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.arch }}
+          path: packages/
+          if-no-files-found: error
+
+  release:
+    name: Sign and publish
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    # The owner approves each release; only this environment holds the key.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist/
+      - name: Install minisign
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends minisign
+      - name: Write and sign SHA256SUMS
+        working-directory: dist
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          sha256sum -- * >SHA256SUMS
+          cat SHA256SUMS
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" >"$key"
+          # The Agent reads the release version from this signed comment.
+          minisign -S -s "$key" -m SHA256SUMS -t "hostbeacon $VERSION"
+      - name: Check the signature with the keys compiled into the Agent
+        run: |
+          keys=$(sed -n 's/^var PublicKeys = "\(.*\)"$/\1/p' agent/internal/release/release.go)
+          for key in $keys; do
+            if minisign -V -P "$key" -m dist/SHA256SUMS; then
+              exit 0
+            fi
+          done
+          echo "::error::No key compiled into the Agent verifies the signature"
+          exit 1
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG" dist/* --verify-tag --latest --title "Hostbeacon $VERSION" --generate-notes

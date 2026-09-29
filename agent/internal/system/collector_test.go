@@ -120,3 +120,18 @@ func TestRunPublishesOnIntervals(t *testing.T) {
 		return !slices.Contains(slices.Collect(maps.Values(seen)), false)
 	})
 }
+
+func TestNewestAgentVersionIsPublishedInTheAgentGroup(t *testing.T) {
+	collector := NewCollector(detect(t, fakeHost(t), "none", newFakeServices()), DefaultIntervals, agentInfo)
+	if newest := collector.Sample(context.Background()).Agent.NewestAgentVersion; newest != nil {
+		t.Fatalf("newest %q before the first check", *newest)
+	}
+	var published []protocol.Groups
+	collector.SetNewestAgentVersion("1.2.3", func(groups protocol.Groups) { published = append(published, groups) })
+	if len(published) != 1 || published[0].Agent == nil || *published[0].Agent.NewestAgentVersion != "1.2.3" {
+		t.Fatalf("published %+v", published)
+	}
+	if newest := collector.Sample(context.Background()).Agent.NewestAgentVersion; newest == nil || *newest != "1.2.3" {
+		t.Errorf("newest %v in the next sample", newest)
+	}
+}

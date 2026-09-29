@@ -30,7 +30,15 @@ STORAGE_VERSION = 1
 # An Update run running longer gets the "taking over 1 hour" repair.
 LONG_UPDATE_RUN = timedelta(hours=1)
 # The repairs this Integration raises for a Host, by issue ID prefix.
-ISSUE_KINDS = ("certificate_changed", "two_machines", "update_run_long", "package_system_broken", "needs_manual_update")
+ISSUE_KINDS = (
+    "certificate_changed",
+    "two_machines",
+    "update_run_long",
+    "package_system_broken",
+    "needs_manual_update",
+    "update_agent",
+    "update_integration",
+)
 
 type HostbeaconConfigEntry = ConfigEntry[HostConnection]
 
@@ -73,12 +81,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -
             identifiers=identifiers,
             name=agent.hostname if agent else hello.hostname,
             model=distro or None,
-            sw_version=agent.agent_version if agent else hello.agent_version,
+            sw_version=connection.agent_version,
             hw_version=hello.architecture,
         )
 
     entry.async_on_unload(connection.add_listener(update_device))
     _track_problems(hass, entry, connection)
+    _track_limited_mode(hass, entry, connection)
     _track_update_repairs(hass, entry, connection)
     await _track_reboot(hass, entry, connection)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -120,6 +129,38 @@ def _track_problems(hass: HomeAssistant, entry: HostbeaconConfigEntry, connectio
             entry.async_start_reauth(hass)
 
     entry.async_on_unload(connection.add_listener(problem_changed))
+
+
+def _track_limited_mode(hass: HomeAssistant, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
+    """Raise repair 6 of v1 spec §7.7 while the Agent and this Integration share no protocol major.
+
+    "Update the Agent on <Host>" when the Agent is older, "Update Hostbeacon in
+    HACS" when this Integration is. Removed once the Host is Online again.
+    """
+    raised: str | None = None
+
+    @callback
+    def changed() -> None:
+        nonlocal raised
+        if connection.limited is not None and connection.limited != raised:
+            if raised is not None:
+                ir.async_delete_issue(hass, DOMAIN, f"update_{raised}_{entry.entry_id}")
+            raised = connection.limited
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                f"update_{raised}_{entry.entry_id}",
+                is_fixable=False,
+                is_persistent=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key=f"update_{raised}",
+                translation_placeholders={"host": entry.title},
+            )
+        elif connection.online and raised is not None:
+            ir.async_delete_issue(hass, DOMAIN, f"update_{raised}_{entry.entry_id}")
+            raised = None
+
+    entry.async_on_unload(connection.add_listener(changed))
 
 
 def _track_update_repairs(hass: HomeAssistant, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:

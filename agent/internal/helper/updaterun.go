@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -135,25 +136,29 @@ func UpdateRunGroup(record *UpdateRunRecord) protocol.UpdateRun {
 	}
 }
 
-// UpdateRunStarter starts the Update run unit for the helper.
-type UpdateRunStarter interface {
-	// Active says whether the unit runs now: the run slot is taken.
+// UnitStarter starts the unit of a package task (the Update run or the Agent
+// update) for the helper.
+type UnitStarter interface {
+	// Active says whether the unit runs now: for the Update run, the run
+	// slot is taken.
 	Active(ctx context.Context) (bool, error)
 	// Start starts the unit for actionID and returns once the unit holds
 	// the package-task lock.
 	Start(ctx context.Context, actionID string) error
 }
 
-// SystemdUpdateRun starts the Update run unit with systemctl.
-type SystemdUpdateRun struct {
-	Run     command.Command
+// SystemdUnit starts a package task unit with systemctl.
+type SystemdUnit struct {
+	Run command.Command
+	// Unit is the unit's name; Request passes the Action ID to it.
+	Unit    string
 	Request string
 }
 
 // Active says whether the unit is starting, running, or stopping.
-func (s SystemdUpdateRun) Active(ctx context.Context) (bool, error) {
+func (s SystemdUnit) Active(ctx context.Context) (bool, error) {
 	// is-active exits 3 for an inactive unit, and still prints its state.
-	out, err := s.Run(ctx, "systemctl", "is-active", UpdateRunUnit)
+	out, err := s.Run(ctx, "systemctl", "is-active", s.Unit)
 	state := strings.TrimSpace(string(out))
 	if state == "" {
 		return false, withStderr(err)
@@ -164,7 +169,7 @@ func (s SystemdUpdateRun) Active(ctx context.Context) (bool, error) {
 // Start passes actionID to the unit and starts it. The unit tells systemd it
 // is ready only once it holds the package-task lock, so systemctl returns
 // then; it fails when the unit could not take the lock.
-func (s SystemdUpdateRun) Start(ctx context.Context, actionID string) error {
+func (s SystemdUnit) Start(ctx context.Context, actionID string) error {
 	data, _ := json.Marshal(runRequest{ActionID: actionID})
 	if err := os.MkdirAll(filepath.Dir(s.Request), 0o755); err != nil {
 		return err
@@ -172,8 +177,24 @@ func (s SystemdUpdateRun) Start(ctx context.Context, actionID string) error {
 	if err := statefile.Write(s.Request, data, 0o600); err != nil {
 		return err
 	}
-	_, err := s.Run(ctx, "systemctl", "start", UpdateRunUnit)
+	_, err := s.Run(ctx, "systemctl", "start", s.Unit)
 	return withStderr(err)
+}
+
+// NotifyReady tells systemd that the unit is ready (sd_notify READY=1).
+func NotifyReady() error {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return errors.New("NOTIFY_SOCKET is not set: only its systemd unit runs this")
+	}
+	// A name starting with @ is an abstract socket; Go handles it.
+	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: socket, Net: "unixgram"})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte("READY=1"))
+	return err
 }
 
 type runRequest struct {

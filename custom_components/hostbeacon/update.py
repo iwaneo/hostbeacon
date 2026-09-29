@@ -1,5 +1,6 @@
-"""The Updates entity of a Host: its Available updates, and Install runs an
-Update run (v1 spec §7.3, §8)."""
+"""The update entities of a Host: Updates shows its Available updates, and
+Install runs an Update run (v1 spec §7.3, §8); Agent shows the Agent version,
+and Install runs an Agent update (v1 spec §10)."""
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
 from . import HostbeaconConfigEntry
-from .connection import ActionError, HostConnection
+from .connection import AGENT_UPDATE_TIMEOUT, ActionError, HostConnection
 from .const import DOMAIN
 from .entity import HostEntity, refusal_message
 
@@ -29,13 +30,18 @@ SHORT_FINGERPRINT = 8
 
 # Refusals with a message for Update run only.
 UPDATE_RUN_REFUSALS = {"disabled": "update_run_disabled"}
+# Refusals with a message for Agent update only.
+AGENT_UPDATE_REFUSALS = {"disabled": "agent_update_disabled"}
+
+RELEASES_URL = "https://github.com/iwaneo/hostbeacon/releases/tag/v{version}"
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: HostbeaconConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    """Add the Updates entity."""
-    async_add_entities([UpdatesEntity(entry, connection=entry.runtime_data)])
+    """Add the Updates and Agent entities."""
+    connection = entry.runtime_data
+    async_add_entities([UpdatesEntity(entry, connection), AgentEntity(entry, connection)])
 
 
 class UpdatesEntity(HostEntity, UpdateEntity):
@@ -168,6 +174,89 @@ class UpdatesEntity(HostEntity, UpdateEntity):
         if "update_run" not in self._connection.enabled_actions:
             parts.append(text("update_run_off", host=self._entry_title))
         return "\n\n".join(parts)
+
+
+class AgentEntity(HostEntity, UpdateEntity):
+    """Shows the Agent version and the newest release. Install runs an Agent update.
+
+    It stays available in limited mode, so an Agent too old for this
+    Integration can still be updated.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "agent"
+
+    def __init__(self, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
+        super().__init__(entry, connection, "agent")
+
+    @property
+    def available(self) -> bool:
+        return self._connection.online or self._connection.limited is not None
+
+    @property
+    def supported_features(self) -> UpdateEntityFeature:
+        """Install only when Agent update is enabled on the Host."""
+        features = UpdateEntityFeature.RELEASE_NOTES
+        if "agent_update" in self._connection.enabled_actions:
+            features |= UpdateEntityFeature.INSTALL
+        return features
+
+    @property
+    def installed_version(self) -> str | None:
+        return self._connection.agent_version
+
+    @property
+    def latest_version(self) -> str | None:
+        """The newest release; the installed version until the Agent could check."""
+        return self._connection.newest_agent_version or self.installed_version
+
+    @property
+    def release_url(self) -> str | None:
+        newest = self._connection.newest_agent_version
+        return RELEASES_URL.format(version=newest) if newest else None
+
+    async def async_release_notes(self) -> str | None:
+        texts = await async_get_translations(self.hass, self.hass.config.language, "exceptions", [DOMAIN])
+        prefix = f"component.{DOMAIN}.exceptions."
+        if "agent_update" not in self._connection.enabled_actions:
+            return texts[f"{prefix}release_notes_agent_update_off.message"].format(host=self._entry_title)
+        return texts[f"{prefix}release_notes_agent_update.message"].format(
+            host=self._entry_title, newest=self.latest_version, installed=self.installed_version
+        )
+
+    async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
+        """Run an Agent update and wait for its result. A failed update is an error."""
+        # Read the caller before any await: the context may change after it.
+        context = self._context
+        user_id = context.user_id if context else None
+        user = None
+        if user_id is not None:
+            # Home Assistant 2026.9 and later refuse non-admins before this.
+            user = await self.hass.auth.async_get_user(user_id)
+            if user is None or not user.is_admin:
+                raise self._error("agent_update_not_admin")
+        try:
+            # An admin without a name is still a user, not "no HA user".
+            ack = await self._connection.request_action("agent_update", (user.name or user.id) if user else None)
+        except ActionError as err:
+            raise self._error("action_no_answer") from err
+        if ack.status != "accepted":
+            message, placeholders = refusal_message(ack, AGENT_UPDATE_REFUSALS)
+            raise self._error(message, **placeholders)
+        # The update restarts the Agent: the result comes on a new connection.
+        try:
+            result = await self._connection.wait_for_action_result(ack.action_id, AGENT_UPDATE_TIMEOUT)
+        except TimeoutError as err:
+            raise self._error("agent_update_result_unknown") from err
+        if result.result != "ok":
+            raise self._error("agent_update_failed", error=result.error or "")
+
+    def _error(self, message: str, **placeholders: str) -> HomeAssistantError:
+        return HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key=message,
+            translation_placeholders={"host": self._host_name(), "action": "Agent update", **placeholders},
+        )
 
 
 def _package_table(text: Text, connection: HostConnection) -> str:

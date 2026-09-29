@@ -236,6 +236,9 @@
     "update": {
       "updates": {
         "name": "Updates"
+      },
+      "agent": {
+        "name": "Agent"
       }
     }
   },
@@ -350,6 +353,24 @@
     },
     "release_notes_update_run_off": {
       "message": "Update run is turned off on {host}, so Install is not offered. The Host owner can turn it on in the Agent config."
+    },
+    "agent_update_not_admin": {
+      "message": "Only Home Assistant admins can update the Agent on {host}."
+    },
+    "agent_update_disabled": {
+      "message": "Agent update is turned off on {host}. The Host owner can turn it on with `sudo hostbeacon setup`, or update the Agent on the Host with `sudo hostbeacon update`."
+    },
+    "agent_update_failed": {
+      "message": "The Agent update on {host} failed: {error}"
+    },
+    "agent_update_result_unknown": {
+      "message": "The result of the Agent update on {host} is unknown: the Agent did not report it within 20 minutes. To see what happened, run on the Host: `journalctl -u hostbeacon-agent-update`"
+    },
+    "release_notes_agent_update": {
+      "message": "Install updates the Agent on {host} from {installed} to {newest}. The Agent downloads the release from GitHub, checks its signature, and goes back to {installed} if the new version does not start."
+    },
+    "release_notes_agent_update_off": {
+      "message": "Agent update is turned off on {host}, so Install is not offered. To update the Agent, run on the Host:\n\n`sudo hostbeacon update`\n\nThe Host owner can turn Agent update on with `sudo hostbeacon setup`."
     }
   },
   "issues": {
@@ -383,6 +404,14 @@
     "needs_manual_update": {
       "title": "{host} needs a manual update",
       "description": "The last Update run on {host} installed nothing, because it would remove packages or move the Host to another distro release. Hostbeacon never does either by itself.\n\nThe release notes of the {host} Updates entity list the packages. Update the Host by hand, and check what the package manager would change before you accept: `sudo apt full-upgrade` (Debian, Ubuntu) or `sudo dnf upgrade` (Fedora, RHEL).\n\nThis repair goes away when a later Update run passes its checks, or no Available updates are left."
+    },
+    "update_agent": {
+      "title": "Update the Agent on {host}",
+      "description": "The Agent on {host} is too old for this version of Hostbeacon, so {host} is Offline. Only Agent update works.\n\nUpdate the Agent: select Install on the Agent entity of {host}, or run on the Host:\n\n`sudo hostbeacon update`\n\nThis repair goes away when {host} is Online again."
+    },
+    "update_integration": {
+      "title": "Update Hostbeacon in HACS",
+      "description": "The Agent on {host} is newer than this version of Hostbeacon can use, so {host} is Offline.\n\nIn HACS, update Hostbeacon and restart Home Assistant.\n\nThis repair goes away when {host} is Online again."
     }
   }
 }

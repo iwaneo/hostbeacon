@@ -14,7 +14,7 @@ if [ -e /usr/local/bin/hostbeacon ]; then
 Hostbeacon is installed from the tarball already. Remove that install first
 (this keeps the Agent's identity and Pairings), then install the package again:
   sudo systemctl disable --now hostbeacon.service hostbeacon-helper.service hostbeacon-package-list-refresh.timer
-  sudo rm /usr/local/bin/hostbeacon /usr/local/bin/hostbeacon-helper /etc/systemd/system/hostbeacon*.service /etc/systemd/system/hostbeacon*.timer /etc/sysusers.d/hostbeacon.conf /etc/tmpfiles.d/hostbeacon.conf
+  sudo rm -r /usr/local/bin/hostbeacon /usr/local/bin/hostbeacon-helper /usr/local/lib/hostbeacon /etc/systemd/system/hostbeacon*.service /etc/systemd/system/hostbeacon*.timer /etc/sysusers.d/hostbeacon.conf /etc/tmpfiles.d/hostbeacon.conf
 MESSAGE
 	exit 1
 fi

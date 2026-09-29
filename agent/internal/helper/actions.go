@@ -49,10 +49,10 @@ var DefaultPackageManagerPIDLocks = []string{
 // minUptime: no Reboot within 10 minutes of boot (v1 spec §9).
 const minUptime = 10 * time.Minute
 
-// updateRunStartTimeout limits how long the helper waits for the Update run
-// unit to take the package-task lock. Home Assistant waits 30 seconds for
-// the answer.
-const updateRunStartTimeout = 25 * time.Second
+// unitStartTimeout limits how long the helper waits for the Update run or
+// Agent update unit to take the package-task lock. Home Assistant waits 30
+// seconds for the answer.
+const unitStartTimeout = 25 * time.Second
 
 const maxUser = 256
 
@@ -91,9 +91,12 @@ type ActionRunner struct {
 	PackageManager string
 	// UpdateRuns starts the Update run unit. Without it, Update run is
 	// refused.
-	UpdateRuns UpdateRunStarter
+	UpdateRuns UnitStarter
 	// UpdateRunRecord is the Update run record.
 	UpdateRunRecord string
+	// AgentUpdates starts the Agent update unit. Without it, Agent update is
+	// refused.
+	AgentUpdates UnitStarter
 
 	// mu makes the Action ID check and the log write one step.
 	mu sync.Mutex
@@ -144,8 +147,8 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 	if entry.Status == "refused" {
 		return Ack{Status: "refused", Reason: &entry.Reason, FirstResult: first}, nil, nil
 	}
-	if request.Action == protocol.ActionUpdateRun {
-		// The unit runs it now; its result comes through the run record.
+	if request.Action == protocol.ActionUpdateRun || request.Action == protocol.ActionAgentUpdate {
+		// The unit runs it now; its result comes through the unit's record.
 		return Ack{Status: "accepted"}, nil, nil
 	}
 	return Ack{Status: "accepted"}, func(ctx context.Context) protocol.ActionOutcome {
@@ -156,7 +159,7 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 
 // guard returns why the request is refused, or "" when it may run. For an
 // accepted Reboot, release frees the package-task lock it holds. An accepted
-// Update run has already started: its unit holds the lock.
+// Update run or Agent update has already started: its unit holds the lock.
 func (r *ActionRunner) guard(cfg config.Config, request ActionRequest) (reason protocol.RefusalReason, first *protocol.ActionOutcome, release func()) {
 	found, first, err := r.Log.find(request.ActionID)
 	if err != nil {
@@ -174,39 +177,43 @@ func (r *ActionRunner) guard(cfg config.Config, request ActionRequest) (reason p
 		reason, release = r.guardReboot()
 		return reason, nil, release
 	case protocol.ActionUpdateRun:
-		return r.startUpdateRun(request), nil, nil
+		if r.PackageManager == "" || r.UpdateRuns == nil {
+			return protocol.ReasonDisabled, nil, nil
+		}
+		// The one run slot (v1 spec §8).
+		return r.startUnit(r.UpdateRuns, request, protocol.ReasonUpdateRunRunning), nil, nil
 	}
-	// Agent update comes in a later release of this helper.
-	return protocol.ReasonDisabled, nil, nil
+	if r.AgentUpdates == nil {
+		return protocol.ReasonDisabled, nil, nil
+	}
+	return r.startUnit(r.AgentUpdates, request, protocol.ReasonBusy), nil, nil
 }
 
-// startUpdateRun reserves the one run slot and starts the Update run unit
-// (v1 spec §8). It returns "" once the unit holds the package-task lock.
-func (r *ActionRunner) startUpdateRun(request ActionRequest) protocol.RefusalReason {
-	if r.PackageManager == "" || r.UpdateRuns == nil {
-		return protocol.ReasonDisabled
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), updateRunStartTimeout)
+// startUnit starts the unit of an Update run or an Agent update. It returns
+// "" once the unit holds the package-task lock, and whenRunning when the
+// unit runs already.
+func (r *ActionRunner) startUnit(unit UnitStarter, request ActionRequest, whenRunning protocol.RefusalReason) protocol.RefusalReason {
+	ctx, cancel := context.WithTimeout(context.Background(), unitStartTimeout)
 	defer cancel()
 	// The helper handles one request at a time, so no other request can
-	// take the slot between this check and the start.
-	active, err := r.UpdateRuns.Active(ctx)
+	// start the unit between this check and the start.
+	active, err := unit.Active(ctx)
 	if err != nil {
-		r.Journal.Error("Update run refused: cannot read the Update run unit", "error", err)
+		r.Journal.Error("Action refused: cannot read its unit", "action", request.Action, "error", err)
 		return protocol.ReasonBusy
 	}
 	if active {
-		return protocol.ReasonUpdateRunRunning
+		return whenRunning
 	}
 	// The unit takes the lock itself; this check spares starting it.
 	release, err := lockPackageTask(r.PackageTaskLock)
 	if err != nil {
-		r.Journal.Info("Update run refused: a package task holds the package-task lock", "error", err)
+		r.Journal.Info("Action refused: a package task holds the package-task lock", "action", request.Action, "error", err)
 		return protocol.ReasonBusy
 	}
 	release()
-	if err := r.UpdateRuns.Start(ctx, request.ActionID); err != nil {
-		r.Journal.Warn("Update run refused: the Update run unit did not take the package-task lock", "error", err)
+	if err := unit.Start(ctx, request.ActionID); err != nil {
+		r.Journal.Warn("Action refused: its unit did not take the package-task lock", "action", request.Action, "error", err)
 		return protocol.ReasonBusy
 	}
 	return ""

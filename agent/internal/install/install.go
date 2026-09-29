@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/command"
@@ -32,12 +33,17 @@ const NoSystemd = "Hostbeacon needs systemd, and systemd is not running on this 
 
 // Tarball installs the Agent from an unpacked tarball, for distros without
 // a .deb or .rpm (v1 spec §4.3). Everything goes under /usr/local and /etc,
-// owned by root and writable only by root.
+// owned by root and writable only by root. Each version has its own
+// directory in /usr/local/lib/hostbeacon; one symlink, current, picks the
+// version that runs, so the Agent update can switch versions and back in one
+// step (v1 spec §10).
 type Tarball struct {
 	// Root is the Host's root, "/" outside tests.
 	Root string
 	// Source is the directory holding hostbeacon and hostbeacon-helper.
 	Source string
+	// Version is the version of the programs in Source.
+	Version string
 	// Run runs systemctl and the other systemd tools.
 	Run command.Command
 	// Out gets the messages for the owner.
@@ -53,9 +59,20 @@ func (t Tarball) Install(ctx context.Context) error {
 	if _, err := os.Stat(filepath.Join(t.Root, "usr/bin/hostbeacon")); err == nil {
 		return errors.New("Hostbeacon is installed from a package (.deb or .rpm) already. Remove the package first, or install a newer package instead")
 	}
-	bin := filepath.Join(t.Root, "usr/local/bin")
-	for _, name := range []string{"hostbeacon", "hostbeacon-helper"} {
-		if err := copyProgram(filepath.Join(t.Source, name), filepath.Join(bin, name)); err != nil {
+	if !validVersion(t.Version) {
+		return fmt.Errorf("%q is not a version", t.Version)
+	}
+	lib := filepath.Join(t.Root, "usr/local/lib/hostbeacon")
+	for _, name := range programs {
+		if err := copyProgram(filepath.Join(t.Source, name), filepath.Join(lib, t.Version, name)); err != nil {
+			return err
+		}
+	}
+	if err := switchSymlink(filepath.Join(lib, "current"), t.Version); err != nil {
+		return err
+	}
+	for _, name := range programs {
+		if err := switchSymlink(filepath.Join(t.Root, "usr/local/bin", name), "../lib/hostbeacon/current/"+name); err != nil {
 			return err
 		}
 	}
@@ -88,6 +105,32 @@ func (t Tarball) Install(ctx context.Context) error {
 		fmt.Fprintln(t.Out, "No Action is turned on. Next, turn on the Actions you want and pair Home Assistant:\n  sudo hostbeacon setup")
 	}
 	return nil
+}
+
+var programs = []string{"hostbeacon", "hostbeacon-helper"}
+
+// versionPattern is a version that is safe as a directory name.
+var versionPattern = regexp.MustCompile(`^[0-9][0-9A-Za-z.+~-]*$`)
+
+func validVersion(version string) bool { return versionPattern.MatchString(version) }
+
+// switchSymlink points the symlink at link to target in one step. It
+// replaces a file there too.
+func switchSymlink(link, target string) error {
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return err
+	}
+	temp := link + ".new"
+	os.Remove(temp)
+	if err := os.Symlink(target, temp); err != nil {
+		return err
+	}
+	if os.Geteuid() == 0 {
+		if err := os.Lchown(temp, 0, 0); err != nil {
+			return err
+		}
+	}
+	return os.Rename(temp, link)
 }
 
 // eachFile calls fn with each install file's name under files/ and its data.

@@ -369,7 +369,7 @@ func TestAptUpdateRunInstallsExactlyTheApprovedPackages(t *testing.T) {
 	if results := u.resultLines(t); len(results) != 1 || results[0]["result"] != "ok" || results[0]["action_id"] != firstID {
 		t.Errorf("Action log results %v", results)
 	}
-	if data, _ := os.ReadFile(u.Stamp); string(data) != "2026-09-29T12:00:00Z\n" {
+	if data, _ := os.ReadFile(u.Stamp); string(data) != `{"format":1,"refreshed_at":"2026-09-29T12:00:00Z"}`+"\n" {
 		t.Errorf("stamp %q", data)
 	}
 	if _, err := os.Stat(u.Request); !errors.Is(err, os.ErrNotExist) {

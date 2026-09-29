@@ -29,6 +29,7 @@ import (
 	"github.com/iwaneo/hostbeacon/agent/internal/install"
 	"github.com/iwaneo/hostbeacon/agent/internal/pairing"
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
+	"github.com/iwaneo/hostbeacon/agent/internal/release"
 	"github.com/iwaneo/hostbeacon/agent/internal/server"
 	"github.com/iwaneo/hostbeacon/agent/internal/system"
 	"github.com/iwaneo/hostbeacon/agent/internal/version"
@@ -64,8 +65,11 @@ const usage = `Usage:
                       keep this Host's identity and end an identity hold (run as root)
   hostbeacon regenerate-key [--yes]
                       make a new key and certificate; removes every Pairing (run as root)
+  hostbeacon update   update the Agent to the newest release, as Home Assistant's
+                      Install does: checks the release signature, and goes back
+                      to this version if the new one does not start (run as root)
   hostbeacon install  install the Agent from the unpacked tarball, into
-                      /usr/local/bin (run as root, from the tarball directory)
+                      /usr/local (run as root, from the tarball directory)
   hostbeacon serve    run the network part (systemd starts it)
   hostbeacon version  show the version
 `
@@ -84,7 +88,12 @@ func main() {
 		err = pair(args)
 	case "pairings":
 		err = pairings(args, os.Stdout, time.Now(), time.Local)
-	case "setup", "status", "install", "reset-identity", "keep-identity", "regenerate-key":
+	case "agent-update":
+		// The Agent update unit's main process; it checks for root itself.
+		err = agentUpdateUnit(args)
+	case "agent-update-ended":
+		err = agentUpdateEnded(args)
+	case "setup", "status", "update", "install", "reset-identity", "keep-identity", "regenerate-key":
 		if os.Geteuid() != 0 {
 			err = errors.New("run it as root: sudo hostbeacon " + command)
 			break
@@ -92,6 +101,7 @@ func main() {
 		run := map[string]func([]string, owner) error{
 			"setup":          setup,
 			"status":         status,
+			"update":         updateAgent,
 			"install":        installTarball,
 			"reset-identity": resetIdentity,
 			"keep-identity":  keepIdentity,
@@ -122,7 +132,7 @@ func installTarball(args []string, o owner) error {
 	if self, err = filepath.EvalSymlinks(self); err != nil {
 		return err
 	}
-	tarball := install.Tarball{Root: "/", Source: filepath.Dir(self), Run: o.run, Out: o.out}
+	tarball := install.Tarball{Root: "/", Source: filepath.Dir(self), Version: version.Version, Run: o.run, Out: o.out}
 	return tarball.Install(context.Background())
 }
 
@@ -295,6 +305,12 @@ func serve(args []string) error {
 	time.Sleep(time.Second) // the first CPU value needs an earlier reading
 	state := server.NewState(collector.Sample(ctx))
 	collector.Run(ctx, state.Set)
+	keys, err := release.ParseKeys(release.PublicKeys)
+	if err != nil {
+		return err
+	}
+	go checkNewestVersion(ctx, log, keys, func(newest string) { collector.SetNewestAgentVersion(newest, state.Set) })
+	go watchAgentUpdate(ctx, log, state, helper.DefaultAgentUpdateRecord)
 
 	pairings := pairing.Open(*stateDir, time.Now)
 	go warnStalePairings(ctx, log, pairings)
