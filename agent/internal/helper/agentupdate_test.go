@@ -366,11 +366,27 @@ func TestAgentUpdateSaysWhenTheRollbackFailsToo(t *testing.T) {
 	wantAgentUpdate(t, u.start(t), ResultFailed, "the rollback to 1.0.0 failed too")
 }
 
-func TestAgentUpdateRollsBackAFailedInstall(t *testing.T) {
+func TestAgentUpdateAfterAFailedInstallRollsBackOnlyWhenTheOldVersionDoesNotRun(t *testing.T) {
 	u := newAgentUpdate(t, release.Deb)
 	u.host.fail["apt-get install -y -q -o DPkg::Lock::Timeout=300 /"] = errors.New("exit status 100")
-
+	// The install changed nothing: 1.0.0 still runs.
 	wantAgentUpdate(t, u.start(t), ResultFailed, "The install failed")
+	if u.host.ran("apt-get install -y -q -o DPkg::Lock::Timeout=300 --allow-downgrades") {
+		t.Errorf("rolled back: %q", u.host.commands)
+	}
+
+	u = newAgentUpdate(t, release.Deb)
+	u.host.fail["apt-get install -y -q -o DPkg::Lock::Timeout=300 /"] = errors.New("exit status 100")
+	calls := 0
+	healthy := u.Healthy
+	u.Healthy = func(ctx context.Context, version string) error {
+		// The half-done install broke 1.0.0; the rollback repairs it.
+		if calls++; calls == 1 {
+			return errors.New("hostbeacon.service is failed")
+		}
+		return healthy(ctx, version)
+	}
+	wantAgentUpdate(t, u.start(t), ResultFailed, "went back to 1.0.0")
 	if !u.host.ran("apt-get install -y -q -o DPkg::Lock::Timeout=300 --allow-downgrades") {
 		t.Errorf("did not roll back: %q", u.host.commands)
 	}
@@ -569,5 +585,12 @@ func TestSystemdHealthWaitsUntilBothPartsRunTheVersionAndStayUp(t *testing.T) {
 	}
 	if err := health.Check(context.Background(), "1.1.0"); err == nil {
 		t.Fatal("passed while the network part does not run")
+	}
+
+	// A network part that runs but does not listen cannot serve Home Assistant.
+	host.answer = nil
+	health.Listening = func(context.Context) error { return errors.New("connection refused") }
+	if err := health.Check(context.Background(), "1.1.0"); err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("Check = %v, want it to fail while nothing listens", err)
 	}
 }

@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -224,7 +226,15 @@ func agentUpdateUnit(args []string) error {
 		Healthy: helper.SystemdHealth{
 			Run:     run,
 			Program: program,
-			Start:   time.Minute,
+			Listening: func(ctx context.Context) error {
+				var dialer net.Dialer
+				conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+				if err == nil {
+					conn.Close()
+				}
+				return err
+			},
+			Start: time.Minute,
 			// Longer than the units' RestartSec, so a part that crashes
 			// right after it started is seen.
 			Stable: 20 * time.Second,

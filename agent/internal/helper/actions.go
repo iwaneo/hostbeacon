@@ -49,10 +49,10 @@ var DefaultPackageManagerPIDLocks = []string{
 // minUptime: no Reboot within 10 minutes of boot (v1 spec §9).
 const minUptime = 10 * time.Minute
 
-// updateRunStartTimeout limits how long the helper waits for the Update run
-// or Agent update unit to take the package-task lock. Home Assistant waits 30 seconds for
-// the answer.
-const updateRunStartTimeout = 25 * time.Second
+// unitStartTimeout limits how long the helper waits for the Update run or
+// Agent update unit to take the package-task lock. Home Assistant waits 30
+// seconds for the answer.
+const unitStartTimeout = 25 * time.Second
 
 const maxUser = 256
 
@@ -147,7 +147,7 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 	if entry.Status == "refused" {
 		return Ack{Status: "refused", Reason: &entry.Reason, FirstResult: first}, nil, nil
 	}
-	if request.Action != protocol.ActionReboot {
+	if request.Action == protocol.ActionUpdateRun || request.Action == protocol.ActionAgentUpdate {
 		// The unit runs it now; its result comes through the unit's record.
 		return Ack{Status: "accepted"}, nil, nil
 	}
@@ -193,7 +193,7 @@ func (r *ActionRunner) guard(cfg config.Config, request ActionRequest) (reason p
 // "" once the unit holds the package-task lock, and whenRunning when the
 // unit runs already.
 func (r *ActionRunner) startUnit(unit UnitStarter, request ActionRequest, whenRunning protocol.RefusalReason) protocol.RefusalReason {
-	ctx, cancel := context.WithTimeout(context.Background(), updateRunStartTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), unitStartTimeout)
 	defer cancel()
 	// The helper handles one request at a time, so no other request can
 	// start the unit between this check and the start.

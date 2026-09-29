@@ -202,3 +202,13 @@ async def test_limited_mode_is_offline_with_a_repair_and_agent_update_still_work
 
     await wait_for(lambda: state(hass, entry, "host_status") == "online")
     assert issue(hass, repair, entry) is None
+
+
+async def test_a_result_right_after_the_ack_is_not_lost(
+    hass: HomeAssistant, agent: FakeAgent, hass_admin_user: MockUser
+) -> None:
+    """An update that stops at once (for example, the download fails) reports right after the ack."""
+    entry = await add_agent_host(hass, agent)
+    agent.result_at_once = protocol.ActionOutcome(result="failed", error="Cannot check the newest release: 404 Not Found")
+    with pytest.raises(HomeAssistantError, match="Cannot check the newest release"):
+        await asyncio.wait_for(install(hass, entry, hass_admin_user.id), 5)

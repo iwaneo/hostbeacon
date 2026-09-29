@@ -283,21 +283,28 @@ class HostConnection:
         request = protocol.ActionRequest(id=str(uuid.uuid4()), action_id=str(uuid.uuid4()), action=action, user=user)
         answer = asyncio.get_running_loop().create_future()
         self._acks[request.id] = (action, answer)
+        if action == "agent_update":
+            # Its result may come right after the ack: wait for it from now on.
+            self._results[request.action_id] = asyncio.get_running_loop().create_future()
+        ack = None
         try:
             await ws.send_str(protocol.encode(request))
             async with asyncio.timeout(ACK_TIMEOUT):
-                return await answer
+                ack = await answer
+                return ack
         except (aiohttp.ClientError, ConnectionError, TimeoutError) as err:
             raise ActionError from err
         finally:
             del self._acks[request.id]
+            if ack is None or ack.status != "accepted":
+                self._results.pop(request.action_id, None)
 
     async def wait_for_action_result(self, action_id: str, timeout: float) -> protocol.ActionResult:
-        """Wait for the result of an accepted Action, also across reconnects.
+        """Wait for the result of an accepted Agent update, also across reconnects.
 
         Raises TimeoutError when it does not come within timeout.
         """
-        result = self._results.setdefault(action_id, asyncio.get_running_loop().create_future())
+        result = self._results[action_id]
         try:
             async with asyncio.timeout(timeout):
                 return await result

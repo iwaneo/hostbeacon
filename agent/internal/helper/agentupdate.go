@@ -237,7 +237,7 @@ func (u *AgentUpdate) accepted(ctx context.Context, actionID string) bool {
 func (u *AgentUpdate) update(ctx context.Context) (running string, err error) {
 	running = u.Version
 	if !release.IsRelease(u.Version) {
-		return running, fmt.Errorf("the installed Agent %s is not a release, so it cannot update itself; install a release package by hand", u.Version)
+		return running, fmt.Errorf("The installed Agent %s is not a release, so it cannot update itself. Install a release package by hand.", u.Version)
 	}
 	if err := os.MkdirAll(u.Staging, 0o700); err != nil {
 		return running, err
@@ -279,7 +279,12 @@ func (u *AgentUpdate) update(ctx context.Context) (running string, err error) {
 	}
 
 	if err := u.install(ctx, file); err != nil {
-		return u.rollback(ctx, previous, fmt.Errorf("The install failed: %w", err))
+		failed := fmt.Errorf("The install failed: %w", err)
+		// Often the install changed nothing, and the old version still runs.
+		if u.Healthy(ctx, u.Version) == nil {
+			return running, fmt.Errorf("%w. Version %s still runs.", failed, u.Version)
+		}
+		return u.rollback(ctx, previous, failed)
 	}
 	if err := u.Healthy(ctx, latest.Version); err != nil {
 		return u.rollback(ctx, previous, fmt.Errorf("Version %s did not pass the health check (%w)", latest.Version, err))
@@ -513,6 +518,9 @@ type SystemdHealth struct {
 	Run command.Command
 	// Program is the installed hostbeacon, which says its version.
 	Program string
+	// Listening checks that the network part accepts connections; nil
+	// skips it. The helper package has no network code, so the caller gives it.
+	Listening func(ctx context.Context) error
 	// Start is how long both parts may take to start; Stable, how long they
 	// must then run without a restart. Poll is how often they are checked.
 	Start, Stable, Poll time.Duration
@@ -573,6 +581,11 @@ func (h SystemdHealth) running(ctx context.Context, version string) ([]string, e
 			return nil, fmt.Errorf("%s is %s", agentUnits[i], properties["ActiveState"])
 		}
 		pids = append(pids, properties["MainPID"])
+	}
+	if h.Listening != nil {
+		if err := h.Listening(ctx); err != nil {
+			return nil, fmt.Errorf("the network part does not accept connections: %w", err)
+		}
 	}
 	return pids, nil
 }
