@@ -38,8 +38,10 @@ type Tarball struct {
 	Root string
 	// Source is the directory holding hostbeacon and hostbeacon-helper.
 	Source string
-	Run    command.Command
-	Out    io.Writer
+	// Run runs systemctl and the other systemd tools.
+	Run command.Command
+	// Out gets the messages for the owner.
+	Out io.Writer
 }
 
 // Install installs or reinstalls the Agent and starts it. It enables no
@@ -49,7 +51,7 @@ func (t Tarball) Install(ctx context.Context) error {
 		return errors.New(NoSystemd)
 	}
 	if _, err := os.Stat(filepath.Join(t.Root, "usr/bin/hostbeacon")); err == nil {
-		return errors.New("Hostbeacon is installed from a package (.deb or .rpm) already. Update it with `sudo hostbeacon update`, or remove the package first")
+		return errors.New("Hostbeacon is installed from a package (.deb or .rpm) already. Remove the package first, or install a newer package instead")
 	}
 	bin := filepath.Join(t.Root, "usr/local/bin")
 	for _, name := range []string{"hostbeacon", "hostbeacon-helper"} {
@@ -81,9 +83,9 @@ func (t Tarball) Install(ctx context.Context) error {
 			return fmt.Errorf("%s: %w", strings.Join(args, " "), err)
 		}
 	}
-	fmt.Fprintln(t.Out, "Hostbeacon is installed in /usr/local/bin and running. No Action is turned on.")
+	fmt.Fprintln(t.Out, "Hostbeacon is installed in /usr/local/bin and running.")
 	if created {
-		fmt.Fprintln(t.Out, "Next, turn on the Actions you want and pair Home Assistant:\n  sudo hostbeacon setup")
+		fmt.Fprintln(t.Out, "No Action is turned on. Next, turn on the Actions you want and pair Home Assistant:\n  sudo hostbeacon setup")
 	}
 	return nil
 }
@@ -130,9 +132,17 @@ func copyProgram(from, to string) error {
 	return writeFile(to, data, 0o755)
 }
 
+// writeFile writes a file that root runs or reads: owned by root, whoever
+// owns its directory.
 func writeFile(name string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 		return err
 	}
-	return statefile.Write(name, data, perm)
+	if err := statefile.Write(name, data, perm); err != nil {
+		return err
+	}
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	return os.Lchown(name, 0, 0)
 }

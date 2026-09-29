@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -27,13 +28,14 @@ var actionNames = []struct {
 }
 
 // setup turns Actions on or off, allows Home Assistant's VPN address, opens
-// the firewall port, and shows a Pairing code (v1 spec §4.3). With any flag
-// it asks nothing: an Action not named in --actions is off.
+// the firewall port, and shows a Pairing code (v1 spec §4.3). Each question
+// keeps the current answer on Enter, so after install every Action defaults
+// to No. With any flag it asks nothing and changes only what the flags name.
 func setup(args []string, o owner) error {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	configPath := flags.String("config", config.DefaultPath, "the Host config file")
 	stateDir := flags.String("state-dir", defaultStateDir, "the Agent's state directory")
-	actionsFlag := flags.String("actions", "", "the Actions to turn on, comma-separated: reboot, update_run, agent_update, or none")
+	actionsFlag := flags.String("actions", "", "the Actions to turn on, comma-separated: reboot, update_run, agent_update, or none; the others are turned off")
 	vpnFlag := flags.String("vpn-address", "", "Home Assistant's single VPN address (for example its Tailscale address), or none")
 	openFirewall := flags.Bool("open-firewall", false, "open the Agent's TCP port in firewalld or ufw")
 	pairNow := flags.Bool("pair", false, "show a Pairing code")
@@ -50,7 +52,7 @@ func setup(args []string, o owner) error {
 	ctx := context.Background()
 	firewall := detectFirewall(ctx, o)
 
-	var answers config.Setup
+	answers := config.Setup{EnabledActions: current.EnabledActions}
 	interactive := true
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name != "config" && f.Name != "state-dir" {
@@ -60,12 +62,14 @@ func setup(args []string, o owner) error {
 	in := bufio.NewReader(o.in)
 	if interactive {
 		fmt.Fprintln(o.out, "Actions let Home Assistant change this Host. Each one is off unless you turn it on.")
+		answers.EnabledActions = nil
 		for _, a := range actionNames {
-			note := ""
-			if contains(current.EnabledActions, a.action) {
-				note = " It is on now."
+			question := fmt.Sprintf("Turn on %s? %s. [y/N]: ", a.name, a.lets)
+			on := slices.Contains(current.EnabledActions, a.action)
+			if on {
+				question = fmt.Sprintf("%s is on now: %s. Keep it on? [Y/n]: ", a.name, a.lets)
 			}
-			if ask(in, o, fmt.Sprintf("Turn on %s? %s.%s [y/N]: ", a.name, a.lets, note), false) {
+			if ask(in, o, question, on) {
 				answers.EnabledActions = append(answers.EnabledActions, a.action)
 			}
 		}
@@ -74,10 +78,12 @@ func setup(args []string, o owner) error {
 		}
 		*openFirewall = firewall != "" && ask(in, o, fmt.Sprintf("%s is running. Open TCP port %d for the Agent? [y/N]: ", firewall, current.Port), false)
 	} else {
-		if answers.EnabledActions, err = parseActions(*actionsFlag); err != nil {
-			return err
+		if flagSet(flags, "actions") {
+			if answers.EnabledActions, err = parseActions(*actionsFlag); err != nil {
+				return err
+			}
 		}
-		if vpnSet(flags) {
+		if flagSet(flags, "vpn-address") {
 			address := *vpnFlag
 			if address == "none" {
 				address = ""
@@ -91,7 +97,11 @@ func setup(args []string, o owner) error {
 	if err := config.WriteSetup(*configPath, answers); err != nil {
 		return err
 	}
-	fmt.Fprintf(o.out, "\nSaved %s. %s\n", *configPath, describeActions(answers.EnabledActions))
+	on := "No Action is turned on."
+	if names := actionList(answers.EnabledActions); names != "" {
+		on = "Turned on: " + names + "."
+	}
+	fmt.Fprintf(o.out, "\nSaved %s. %s\n", *configPath, on)
 	if err := o.restart(); err != nil {
 		fmt.Fprintln(o.out, "Restart the Agent now, so Home Assistant sees the change: sudo systemctl restart hostbeacon")
 	}
@@ -112,9 +122,10 @@ func setup(args []string, o owner) error {
 	return nil
 }
 
-func vpnSet(flags *flag.FlagSet) bool {
+// flagSet says whether the owner gave the flag name.
+func flagSet(flags *flag.FlagSet, name string) bool {
 	set := false
-	flags.Visit(func(f *flag.Flag) { set = set || f.Name == "vpn-address" })
+	flags.Visit(func(f *flag.Flag) { set = set || f.Name == name })
 	return set
 }
 
@@ -189,34 +200,22 @@ func parseActions(text string) ([]protocol.Action, error) {
 		if !known {
 			return nil, fmt.Errorf("unknown Action %q: use reboot, update_run, agent_update, or none", action)
 		}
-		if !contains(list, action) {
+		if !slices.Contains(list, action) {
 			list = append(list, action)
 		}
 	}
 	return list, nil
 }
 
-// describeActions says which Actions are on, by name.
-func describeActions(list []protocol.Action) string {
+// actionList names the Actions in list, or is empty.
+func actionList(list []protocol.Action) string {
 	var names []string
 	for _, a := range actionNames {
-		if contains(list, a.action) {
+		if slices.Contains(list, a.action) {
 			names = append(names, a.name)
 		}
 	}
-	if len(names) == 0 {
-		return "No Action is turned on."
-	}
-	return "Turned on: " + strings.Join(names, ", ") + "."
-}
-
-func contains(list []protocol.Action, action protocol.Action) bool {
-	for _, a := range list {
-		if a == action {
-			return true
-		}
-	}
-	return false
+	return strings.Join(names, ", ")
 }
 
 // detectFirewall names the firewall manager that is running: firewalld, ufw,

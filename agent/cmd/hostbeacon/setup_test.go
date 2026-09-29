@@ -123,6 +123,23 @@ func TestSetupTurnsOnWhatTheOwnerSaysYesTo(t *testing.T) {
 	}
 }
 
+func TestSetupRunAgainKeepsWhatIsOnByDefault(t *testing.T) {
+	// Enter keeps each Action as it is: on for Reboot, off for the others.
+	h := newSetupHost(t, "\n\n\n\n", "", false)
+	if err := config.WriteSetup(h.configPath, config.Setup{EnabledActions: []protocol.Action{protocol.ActionReboot}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.setup(t); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.config(t); !slices.Equal(c.EnabledActions, []protocol.Action{protocol.ActionReboot}) {
+		t.Errorf("enabled actions = %v, want only reboot kept", c.EnabledActions)
+	}
+	if !strings.Contains(h.output.String(), "Reboot is on now") || !strings.Contains(h.output.String(), "Keep it on? [Y/n]") {
+		t.Errorf("the Reboot question does not say it is on:\n%s", h.output.String())
+	}
+}
+
 func TestSetupAsksAboutTailscaleOnlyWhenItIsThere(t *testing.T) {
 	h := newSetupHost(t, "\n\n\n\n", "", false)
 	if err := h.setup(t); err != nil {
@@ -169,15 +186,15 @@ func TestSetupFlagsFormAsksNothing(t *testing.T) {
 		t.Error("a Pairing code was shown without --pair")
 	}
 
-	// A second run with only --pair turns every Action off, keeps the VPN
-	// address, and shows a code.
+	// A second run with only --pair keeps the Actions and the VPN address,
+	// and shows a code.
 	h.output.Reset()
 	if err := h.setup(t, "--pair"); err != nil {
 		t.Fatal(err)
 	}
 	c = h.config(t)
-	if len(c.EnabledActions) != 0 || !c.Allows(mustAddr("100.101.102.103")) {
-		t.Errorf("enabled actions = %v, VPN address allowed = %v; want none, and kept", c.EnabledActions, c.Allows(mustAddr("100.101.102.103")))
+	if len(c.EnabledActions) != 2 || !c.Allows(mustAddr("100.101.102.103")) {
+		t.Errorf("enabled actions = %v, VPN address allowed = %v; want both kept", c.EnabledActions, c.Allows(mustAddr("100.101.102.103")))
 	}
 	if !strings.Contains(h.output.String(), "Pairing code: ") {
 		t.Errorf("no Pairing code:\n%s", h.output.String())

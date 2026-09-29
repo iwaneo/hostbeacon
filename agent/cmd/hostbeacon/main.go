@@ -42,9 +42,10 @@ const (
 const usage = `Usage:
   hostbeacon setup    turn Actions on or off, allow Home Assistant's VPN address,
                       open the firewall port, and pair (run as root). It asks
-                      each question. With flags it asks nothing, and an Action
-                      not named in --actions is off:
+                      each question. With flags it asks nothing and changes
+                      only what the flags name:
                         --actions reboot,update_run,agent_update | none
+                                                         (the others are turned off)
                         --vpn-address <address> | none   (unchanged if not given)
                         --open-firewall                  (firewalld or ufw)
                         --pair                           (show a Pairing code)

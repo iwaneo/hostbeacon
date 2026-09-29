@@ -21,6 +21,8 @@ if [ ! -e /etc/hostbeacon/config.json ]; then
 	new=yes
 fi
 
+# The owner turns the list refresh off in the Host config, not with systemctl,
+# so enabling the units again on upgrade keeps the owner's choices.
 units="hostbeacon-helper.service hostbeacon.service hostbeacon-package-list-refresh.timer"
 systemctl daemon-reload
 # shellcheck disable=SC2086

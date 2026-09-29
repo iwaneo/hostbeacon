@@ -108,11 +108,15 @@ func TestTarballKeepsTheOwnerConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var r recorder
-	if err := (Tarball{Root: root, Source: source, Run: r.run, Out: &bytes.Buffer{}}).Install(context.Background()); err != nil {
+	var out bytes.Buffer
+	if err := (Tarball{Root: root, Source: source, Run: r.run, Out: &out}).Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if c, _ := config.Load(path); len(c.EnabledActions) != 1 {
 		t.Error("a new install replaced the owner's config")
+	}
+	if strings.Contains(out.String(), "No Action") {
+		t.Errorf("the output says no Action is on, but Reboot is:\n%s", out.String())
 	}
 }
 

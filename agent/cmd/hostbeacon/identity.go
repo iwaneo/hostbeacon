@@ -271,9 +271,9 @@ func status(args []string, o owner) error {
 	if c, err := config.Load(configPath); err != nil {
 		fmt.Fprintf(o.out, "Host config: cannot read it, so the Agent accepts no connections: %v\n", err)
 	} else {
-		actions := "none (turn them on with: sudo hostbeacon setup)"
-		if len(c.EnabledActions) > 0 {
-			actions = strings.TrimSuffix(strings.TrimPrefix(describeActions(c.EnabledActions), "Turned on: "), ".")
+		actions := actionList(c.EnabledActions)
+		if actions == "" {
+			actions = "none (turn them on with: sudo hostbeacon setup)"
 		}
 		fmt.Fprintf(o.out, "Actions:     %s\n", actions)
 		fmt.Fprintf(o.out, "Port:        %d\n", c.Port)

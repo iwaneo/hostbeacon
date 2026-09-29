@@ -1,10 +1,11 @@
 #!/bin/sh
-# Runs after the .deb or .rpm removed its files. A remove keeps the Agent's
+# Runs after the .deb or .rpm removed its files: on remove, and on upgrade
+# after the old files are gone (.deb "upgrade", .rpm 1). A remove keeps the Agent's
 # identity, Pairings, and Host config; a purge (.deb only) removes them, so a
 # new install is a new Host (v1 spec §4.3).
 set -e
 case "$1" in
-remove | 0)
+remove | upgrade | 0 | 1)
 	systemctl daemon-reload || true
 	;;
 purge)
