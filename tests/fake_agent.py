@@ -66,6 +66,8 @@ class FakeAgent:
         self.action_requests: list[protocol.ActionRequest] = []
         self.refusal: tuple[str, protocol.ActionOutcome | None] | None = None
         self.answer_actions = True
+        # A result sent right after the ack of an accepted Action.
+        self.result_at_once: protocol.ActionOutcome | None = None
         self.environment: str | None = "vm"
         self.kernel: str | None = "6.12.48+deb13-amd64"
         # The groups other than agent, system, and update_run.
@@ -227,7 +229,10 @@ class FakeAgent:
                 elif isinstance(request, protocol.ActionRequest):
                     self.action_requests.append(request)
                     if self.answer_actions:
-                        await socket.send_str(protocol.encode(self._ack(request)))
+                        ack, outcome = self._ack(request), self.result_at_once
+                        await socket.send_str(protocol.encode(ack))
+                        if outcome is not None and ack.status == "accepted":
+                            await self.send_action_result(outcome.result, outcome.error)
         finally:
             self._sockets.discard(socket)
         return socket

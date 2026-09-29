@@ -384,11 +384,9 @@ func TestLogFilesOlderThanAYearAreRemoved(t *testing.T) {
 func TestInvalidRequestIsAnError(t *testing.T) {
 	dir := t.TempDir()
 	r := newRunner(t, dir)
-	long := strings.Repeat("a", 300)
 	for _, request := range []ActionRequest{
 		{ActionID: "not-a-uuid", Action: protocol.ActionReboot, PairingID: "p1", PairingName: "Home"},
 		{ActionID: firstID, Action: "shutdown", PairingID: "p1", PairingName: "Home"},
-		{ActionID: firstID, Action: protocol.ActionReboot, PairingID: "p1", PairingName: "Home", User: &long},
 		{ActionID: firstID, Action: protocol.ActionReboot, PairingID: "", PairingName: "Home"},
 	} {
 		if _, run, err := r.Request(rebootEnabled, request); err == nil || run != nil {
@@ -397,5 +395,21 @@ func TestInvalidRequestIsAnError(t *testing.T) {
 	}
 	if r.reboots != 0 || len(logEntries(t, dir)) != 0 {
 		t.Error("an invalid request ran or was logged")
+	}
+}
+
+func TestAnyUserNameIsLoggedAndCut(t *testing.T) {
+	dir := t.TempDir()
+	r := newRunner(t, dir)
+	for i, user := range []string{"", strings.Repeat("é", 300)} {
+		request := rebootRequest(identityFor(i))
+		request.User = &user
+		if ack, _, err := r.Request(config.Config{}, request); err != nil || ack.Reason == nil || *ack.Reason != protocol.ReasonDisabled {
+			t.Fatalf("user %q: %+v, %v", user, ack, err)
+		}
+	}
+	entries := logEntries(t, dir)
+	if entries[0]["user"] != "" || entries[1]["user"] != strings.Repeat("é", 256) {
+		t.Errorf("users = %q, %q", entries[0]["user"], entries[1]["user"])
 	}
 }

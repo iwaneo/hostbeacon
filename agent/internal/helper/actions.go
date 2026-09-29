@@ -93,12 +93,15 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 		Action:    request.Action,
 		PairingID: request.PairingID,
 		Pairing:   request.PairingName,
-		User:      noHAUser,
+		User:      ptr(noHAUser),
 		Status:    "accepted",
 		Reason:    reason,
 	}
 	if request.User != nil {
-		entry.User = *request.User
+		// The user name is Home Assistant's claim. Any text is logged, as
+		// JSON, and cut to a length.
+		user := []rune(*request.User)
+		entry.User = ptr(string(user[:min(len(user), maxUser)]))
 	}
 	if reason != "" {
 		entry.Status = "refused"
@@ -111,7 +114,7 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 		entry.Status, entry.Reason, first, release = "refused", protocol.ReasonCannotLog, nil, nil
 	}
 	r.Journal.Info("Action request", "action_id", entry.ActionID, "action", entry.Action, "pairing", entry.Pairing,
-		"pairing_id", entry.PairingID, "user", entry.User, "status", entry.Status, "reason", entry.Reason)
+		"pairing_id", entry.PairingID, "user", *entry.User, "status", entry.Status, "reason", entry.Reason)
 	if entry.Status == "refused" {
 		return Ack{Status: "refused", Reason: &entry.Reason, FirstResult: first}, nil, nil
 	}
@@ -181,11 +184,11 @@ func (request ActionRequest) check() error {
 		return fmt.Errorf("unknown Action %q", request.Action)
 	case !printable(request.PairingID, 64) || !printable(request.PairingName, 64):
 		return errors.New("the Pairing is missing or not printable text")
-	case request.User != nil && !printable(*request.User, maxUser):
-		return errors.New("the user name is too long or not printable text")
 	}
 	return nil
 }
+
+func ptr[T any](value T) *T { return &value }
 
 func printable(text string, maxRunes int) bool {
 	runes := []rune(text)

@@ -141,7 +141,8 @@ class HostConnection:
         # Set after an accepted Reboot until the Agent is back with a new boot time.
         self.reboot: Reboot | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
-        self._acks: dict[str, asyncio.Future[protocol.ActionAck]] = {}
+        # The pending Action requests by message ID: the Action and its answer.
+        self._acks: dict[str, tuple[str, asyncio.Future[protocol.ActionAck]]] = {}
 
     @property
     def capabilities(self) -> list[str]:
@@ -164,7 +165,7 @@ class HostConnection:
             return "rebooting"
         return "online" if self.online else "offline"
 
-    def start_reboot(self) -> None:
+    def _start_reboot(self) -> None:
         """Mark the Host Rebooting after the Agent accepted a Reboot."""
         flags = self.groups.flags
         self.reboot = Reboot(dt_util.utcnow(), flags.last_boot if flags else None)
@@ -187,7 +188,7 @@ class HostConnection:
             raise ActionError
         request = protocol.ActionRequest(id=str(uuid.uuid4()), action_id=str(uuid.uuid4()), action=action, user=user)
         answer = asyncio.get_running_loop().create_future()
-        self._acks[request.id] = answer
+        self._acks[request.id] = (action, answer)
         try:
             await ws.send_str(protocol.encode(request))
             async with asyncio.timeout(ACK_TIMEOUT):
@@ -256,7 +257,7 @@ class HostConnection:
                         await ws.send_str(protocol.encode(reply))
             finally:
                 self._ws = None
-                for answer in self._acks.values():
+                for _, answer in self._acks.values():
                     if not answer.done():
                         answer.set_exception(ActionError())
         if self.online:
@@ -287,9 +288,14 @@ class HostConnection:
                 self._check_rebooted()
                 self._changed()
             case protocol.ActionAck():
-                answer = self._acks.get(message.reply_to)
-                if answer is not None and not answer.done():
-                    answer.set_result(message)
+                action, answer = self._acks.get(message.reply_to, (None, None))
+                if answer is None or answer.done():
+                    return None
+                # Marked here, not by the caller: a failed result may come
+                # right after the ack, before the caller runs again.
+                if action == "reboot" and message.status == "accepted":
+                    self._start_reboot()
+                answer.set_result(message)
             case protocol.ActionResult(action="reboot", result="failed"):
                 _LOGGER.error("Reboot of %s failed: %s", self._name, message.error)
                 self.end_reboot()

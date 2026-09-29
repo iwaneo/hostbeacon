@@ -75,11 +75,11 @@ class RebootButton(HostEntity, ButtonEntity):
             if user is None or not user.is_admin:
                 self._refuse(context, "not_admin", "reboot_not_admin")
         try:
-            ack = await self._connection.request_action("reboot", user.name if user else None)
+            # An admin without a name is still a user, not "no HA user".
+            ack = await self._connection.request_action("reboot", (user.name or user.id) if user else None)
         except ActionError as err:
             raise self._error("action_no_answer") from err
         if ack.status == "accepted":
-            self._connection.start_reboot()
             return
         reason = ack.reason or "refused"
         if reason == "duplicate":

@@ -40,7 +40,7 @@ type logEntry struct {
 	Action    protocol.Action        `json:"action"`
 	PairingID string                 `json:"pairing_id,omitempty"`
 	Pairing   string                 `json:"pairing,omitempty"`
-	User      string                 `json:"user,omitempty"`
+	User      *string                `json:"user,omitempty"`
 	Status    string                 `json:"status,omitempty"`
 	Reason    protocol.RefusalReason `json:"reason,omitempty"`
 	Result    string                 `json:"result,omitempty"`

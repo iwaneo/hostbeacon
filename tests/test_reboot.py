@@ -203,6 +203,19 @@ async def test_failed_reboot_ends_rebooting(hass: HomeAssistant, agent: FakeAgen
     await wait_for(lambda: state(hass, entry, "host_status") == "online")
 
 
+async def test_reboot_that_fails_at_once_does_not_show_rebooting(
+    hass: HomeAssistant, agent: FakeAgent, hass_admin_user: MockUser
+) -> None:
+    """The failed result comes in the same moment as the ack."""
+    entry, button = await add_rebootable_host(hass, agent)
+    agent.result_at_once = protocol.ActionOutcome(result="failed", error="systemctl reboot exited with status 1")
+
+    await press(hass, button, hass_admin_user.id)
+    await hass.async_block_till_done()
+
+    assert state(hass, entry, "host_status") == "online"
+
+
 async def test_rebooting_survives_a_home_assistant_restart(
     hass: HomeAssistant, agent: FakeAgent, hass_admin_user: MockUser
 ) -> None:
