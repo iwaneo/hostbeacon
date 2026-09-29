@@ -8,6 +8,7 @@ from custom_components.hostbeacon.pairing import (
     code_key,
     home_assistant_proof,
     normalize_code,
+    pairing_id,
     pairing_name,
 )
 
@@ -40,3 +41,7 @@ def test_pairing_name_is_what_the_agent_accepts() -> None:
     assert pairing_name("") == "Home Assistant"
     assert pairing_name("\x00\n") == "Home Assistant"
     assert pairing_name("x" * 100) == "x" * 64
+
+
+def test_pairing_id_matches_the_agent() -> None:
+    assert pairing_id(_bytes("key")) == VECTOR["pairing_id"]

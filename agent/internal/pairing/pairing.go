@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/statefile"
@@ -40,6 +42,9 @@ const (
 	Iterations = 100_000
 	// Size is the size in bytes of a key, nonce, fingerprint, and proof.
 	Size = 32
+	// StaleAfter is how long a Pairing may go unseen before the owner is
+	// warned. Old Pairings are never removed by themselves.
+	StaleAfter = 90 * 24 * time.Hour
 
 	codeFile     = "pairing-code.json"
 	pairingsFile = "pairings.json"
@@ -49,6 +54,26 @@ const (
 // ErrRefused is returned for every refused Pairing step. It does not say why,
 // so a guesser learns nothing.
 var ErrRefused = errors.New("pairing refused")
+
+var (
+	// ErrNotFound means no Pairing has that ID or name.
+	ErrNotFound = errors.New("no Pairing has this ID or name")
+	// ErrAmbiguous means several Pairings have that name.
+	ErrAmbiguous = errors.New("several Pairings have this name; use the ID")
+)
+
+// ID is the short ID of the Pairing with this key: the first 8 hex characters
+// of the key's SHA-256. Home Assistant can work it out from its key, so it can
+// tell the owner which Pairing to remove.
+func ID(key []byte) string {
+	sum := sha256.Sum256(key)
+	return idOf(hex.EncodeToString(sum[:]))
+}
+
+// idOf is the Pairing ID for the hex SHA-256 of a key.
+func idOf(keySHA256 string) string {
+	return keySHA256[:min(8, len(keySHA256))]
+}
 
 // CodeKey stretches a Pairing code. nonce is the one Home Assistant sent.
 func CodeKey(code string, nonce []byte) []byte {
@@ -124,12 +149,39 @@ func randomIndex(n int) int {
 	}
 }
 
+// Pairing is one confirmed Pairing as the owner sees it.
+type Pairing struct {
+	ID       string
+	Name     string
+	Created  time.Time
+	LastSeen time.Time
+}
+
+// Stale returns the Pairings in list not seen for StaleAfter or longer.
+func Stale(list []Pairing, now time.Time) []Pairing {
+	var stale []Pairing
+	for _, p := range list {
+		if now.Sub(p.LastSeen) >= StaleAfter {
+			stale = append(stale, p)
+		}
+	}
+	return stale
+}
+
 // pairing is one confirmed Pairing, as stored on the Host.
 type pairing struct {
 	Name      string    `json:"name"`
 	KeySHA256 string    `json:"key_sha256"`
 	Created   time.Time `json:"created"`
 	LastSeen  time.Time `json:"last_seen"`
+}
+
+func (p pairing) public() Pairing {
+	lastSeen := p.LastSeen
+	if lastSeen.IsZero() {
+		lastSeen = p.Created
+	}
+	return Pairing{ID: idOf(p.KeySHA256), Name: p.Name, Created: p.Created, LastSeen: lastSeen}
 }
 
 type pairingList struct {
@@ -207,52 +259,152 @@ func (p *Pairings) Pair(name string, fingerprint, nonce, proof []byte) (key, age
 	return key, AgentProof(codeKey, fingerprint, nonce, key), nil
 }
 
-// Login checks a key and returns the name of its Pairing. The first Login
-// with a pending key confirms it: Home Assistant only uses a key it saved
-// together with the certificate pin. An error means the Pairings file could
-// not be read or written; the key is refused then.
-func (p *Pairings) Login(key []byte) (string, bool, error) {
+// Login checks a key and returns its Pairing. The first Login with a pending
+// key confirms it: Home Assistant only uses a key it saved together with the
+// certificate pin. An error means the Pairings file could not be read or
+// written; the key is refused then.
+func (p *Pairings) Login(key []byte) (Pairing, bool, error) {
 	if len(key) != Size {
-		return "", false, nil
+		return Pairing{}, false, nil
 	}
 	hash := sha256.Sum256(key)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	list, err := p.read()
-	if err != nil {
-		return "", false, err
-	}
-	now := p.now().UTC()
-	found := -1
-	for i, item := range list.Pairings {
-		stored, err := hex.DecodeString(item.KeySHA256)
-		if err == nil && subtle.ConstantTimeCompare(stored, hash[:]) == 1 {
-			found = i
-		}
-	}
-	if found < 0 {
-		kept := p.pending[:0]
-		for _, item := range p.pending {
-			switch {
-			case !now.Before(item.expires):
-			case subtle.ConstantTimeCompare(item.hash[:], hash[:]) == 1:
-				list.Pairings = append(list.Pairings, pairing{Name: item.name, KeySHA256: hex.EncodeToString(hash[:]), Created: now})
-				found = len(list.Pairings) - 1
-			default:
-				kept = append(kept, item)
+	var found Pairing
+	ok := false
+	err := p.update(func(list *pairingList) (bool, error) {
+		now := p.now().UTC()
+		index := -1
+		for i, item := range list.Pairings {
+			stored, err := hex.DecodeString(item.KeySHA256)
+			if err == nil && subtle.ConstantTimeCompare(stored, hash[:]) == 1 {
+				index = i
 			}
 		}
-		p.pending = kept
-		if found < 0 {
-			return "", false, nil
+		if index < 0 {
+			kept := p.pending[:0]
+			for _, item := range p.pending {
+				switch {
+				case !now.Before(item.expires):
+				case subtle.ConstantTimeCompare(item.hash[:], hash[:]) == 1:
+					list.Pairings = append(list.Pairings, pairing{Name: item.name, KeySHA256: hex.EncodeToString(hash[:]), Created: now})
+					index = len(list.Pairings) - 1
+				default:
+					kept = append(kept, item)
+				}
+			}
+			p.pending = kept
+			if index < 0 {
+				return false, nil
+			}
 		}
+		list.Pairings[index].LastSeen = now
+		found, ok = list.Pairings[index].public(), true
+		return true, nil
+	})
+	if err != nil {
+		return Pairing{}, false, err
 	}
-	list.Pairings[found].LastSeen = now
-	if err := p.write(list); err != nil {
-		return "", false, err
+	return found, ok, nil
+}
+
+// List returns the confirmed Pairings, oldest first.
+func (p *Pairings) List() ([]Pairing, error) {
+	var list []Pairing
+	err := p.update(func(stored *pairingList) (bool, error) {
+		for _, item := range stored.Pairings {
+			list = append(list, item.public())
+		}
+		return false, nil
+	})
+	return list, err
+}
+
+// Find returns the Pairing with this ID, or with this name if only one
+// Pairing has it.
+func (p *Pairings) Find(idOrName string) (Pairing, error) {
+	list, err := p.List()
+	if err != nil {
+		return Pairing{}, err
 	}
-	return list.Pairings[found].Name, true, nil
+	for _, matches := range []func(Pairing) bool{
+		func(item Pairing) bool { return item.ID == idOrName },
+		func(item Pairing) bool { return item.Name == idOrName },
+	} {
+		found := slices.DeleteFunc(slices.Clone(list), func(item Pairing) bool { return !matches(item) })
+		switch len(found) {
+		case 0:
+			continue
+		case 1:
+			return found[0], nil
+		}
+		return Pairing{}, ErrAmbiguous
+	}
+	return Pairing{}, ErrNotFound
+}
+
+// Remove deletes the Pairing with this ID. Its key stops working at once.
+func (p *Pairings) Remove(id string) (Pairing, error) {
+	var removed Pairing
+	err := p.update(func(list *pairingList) (bool, error) {
+		var matches []Pairing
+		kept := slices.DeleteFunc(slices.Clone(list.Pairings), func(item pairing) bool {
+			if item.public().ID != id {
+				return false
+			}
+			matches = append(matches, item.public())
+			return true
+		})
+		switch len(matches) {
+		case 0:
+			return false, ErrNotFound
+		case 1:
+			removed, list.Pairings = matches[0], kept
+			return true, nil
+		}
+		return false, ErrAmbiguous
+	})
+	return removed, err
+}
+
+// Seen sets the last seen time of the Pairings with these IDs to now. The
+// Agent calls it for Pairings that stay connected.
+func (p *Pairings) Seen(ids []string) error {
+	return p.update(func(list *pairingList) (bool, error) {
+		now := p.now().UTC()
+		for i, item := range list.Pairings {
+			if slices.Contains(ids, item.public().ID) {
+				list.Pairings[i].LastSeen = now
+			}
+		}
+		return true, nil
+	})
+}
+
+// update reads the Pairings file, calls change, and writes the file back if
+// change says so. A lock on the state directory keeps the network part and a
+// root owner command from overwriting each other's change.
+func (p *Pairings) update(change func(*pairingList) (bool, error)) error {
+	dir, err := os.Open(p.dir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("cannot lock %s: %w", p.dir, err)
+	}
+	defer syscall.Flock(int(dir.Fd()), syscall.LOCK_UN)
+
+	list, err := p.read()
+	if err != nil {
+		return err
+	}
+	write, err := change(&list)
+	if err != nil || !write {
+		return err
+	}
+	return p.write(list)
 }
 
 func (p *Pairings) read() (pairingList, error) {

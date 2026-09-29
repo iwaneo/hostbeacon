@@ -2,9 +2,12 @@
 package main
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -15,9 +18,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/config"
+	"github.com/iwaneo/hostbeacon/agent/internal/discovery"
 	"github.com/iwaneo/hostbeacon/agent/internal/helper"
 	"github.com/iwaneo/hostbeacon/agent/internal/identity"
 	"github.com/iwaneo/hostbeacon/agent/internal/pairing"
@@ -35,6 +40,10 @@ const (
 const usage = `Usage:
   hostbeacon serve    run the network part (systemd starts it)
   hostbeacon pair     show a Pairing code for Home Assistant (run as root)
+  hostbeacon pairings list
+                      show each Home Assistant paired with this Host (run as root)
+  hostbeacon pairings remove <ID or name>
+                      remove a Pairing and close its connection (run as root)
   hostbeacon version  show the version
 `
 
@@ -50,6 +59,8 @@ func main() {
 		err = serve(args)
 	case "pair":
 		err = pair(args)
+	case "pairings":
+		err = pairings(args, os.Stdout, time.Now(), time.Local)
 	case "version", "--version":
 		fmt.Println(version.String())
 	default:
@@ -78,6 +89,76 @@ It works once, until %s (10 minutes), and stops after 5 wrong tries.
 A new code replaces this one.
 `, code, expires.Local().Format("15:04"))
 	return nil
+}
+
+const pairingsUsage = "usage: hostbeacon pairings list | hostbeacon pairings remove <ID or name>"
+
+// pairings lists or removes Pairings. A removed Pairing's key stops working at
+// once, and the running Agent closes its connection within a second.
+func pairings(args []string, out io.Writer, now time.Time, zone *time.Location) error {
+	if len(args) == 0 {
+		return errors.New(pairingsUsage)
+	}
+	flags := flag.NewFlagSet("pairings "+args[0], flag.ContinueOnError)
+	stateDir := flags.String("state-dir", defaultStateDir, "the Agent's state directory")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	store := pairing.Open(*stateDir, time.Now)
+	switch {
+	case args[0] == "list" && flags.NArg() == 0:
+		items, err := store.List()
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			fmt.Fprintln(out, "No Pairings. Run `sudo hostbeacon pair` to pair Home Assistant.")
+			return nil
+		}
+		table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(table, "ID\tNAME\tCREATED\tLAST SEEN")
+		const layout = "2006-01-02 15:04"
+		for _, p := range items {
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Created.In(zone).Format(layout), p.LastSeen.In(zone).Format(layout))
+		}
+		table.Flush()
+		for _, p := range pairing.Stale(items, now) {
+			fmt.Fprintf(out, "\nWarning: Pairing %s (%s) was not seen for 90 days or more. If that Home Assistant is gone, remove it:\n  sudo hostbeacon pairings remove %s\n", p.ID, p.Name, p.ID)
+		}
+		return nil
+	case args[0] == "remove" && flags.NArg() == 1:
+		found, err := store.Find(flags.Arg(0))
+		if err != nil {
+			return err
+		}
+		removed, err := store.Remove(found.ID)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Removed the Pairing %s (%s). Its Home Assistant cannot connect any more.\n", removed.Name, removed.ID)
+		return nil
+	}
+	return errors.New(pairingsUsage)
+}
+
+// warnStalePairings logs each Pairing not seen for 90 days or more, now and
+// then once a day. Old Pairings are never removed by themselves.
+func warnStalePairings(ctx context.Context, log *slog.Logger, pairings *pairing.Pairings) {
+	for {
+		list, err := pairings.List()
+		if err != nil {
+			log.Error("cannot read the Pairings", "error", err)
+		}
+		for _, p := range pairing.Stale(list, time.Now()) {
+			log.Warn("a Pairing was not seen for 90 days or more; if its Home Assistant is gone, run: hostbeacon pairings remove "+p.ID,
+				"pairing", p.Name, "id", p.ID, "last_seen", p.LastSeen)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(24 * time.Hour):
+		}
+	}
 }
 
 func serve(args []string) error {
@@ -136,10 +217,12 @@ func serve(args []string) error {
 	state := server.NewState(collector.Sample(ctx))
 	collector.Run(ctx, state.Set)
 
+	pairings := pairing.Open(*stateDir, time.Now)
+	go warnStalePairings(ctx, log, pairings)
 	s := &server.Server{
 		Config:   hostConfig,
 		Identity: id,
-		Pairings: pairing.Open(*stateDir, time.Now),
+		Pairings: pairings,
 		State:    state,
 		Hello: protocol.HelloRequest{
 			InstanceID:     id.InstanceID,
@@ -165,6 +248,12 @@ func serve(args []string) error {
 		return err
 	}
 	log.Info("listening", "port", hostConfig.Port, "instance_id", id.InstanceID, "fingerprint", fmt.Sprintf("%x", id.Fingerprint))
+	go func() {
+		name := cmp.Or(hostname, "Hostbeacon Agent")
+		if err := discovery.Announce(ctx, name, id.InstanceID, hostConfig.Port); err != nil && ctx.Err() == nil {
+			log.Warn("cannot announce the Agent on the local network; add the Host in Home Assistant by address", "error", err)
+		}
+	}()
 	return s.Serve(ctx, listener)
 }
 

@@ -98,6 +98,12 @@ class FakeAgent:
         self._ssl.minimum_version = ssl.TLSVersion.TLSv1_3
         self._ssl.load_cert_chain(cert_path, key_path)
 
+    def share_identity(self, other: FakeAgent) -> None:
+        """Take the instance ID and certificate of other, as a copy of it would."""
+        self.instance_id = other.instance_id
+        self.fingerprint = other.fingerprint
+        self._ssl = other._ssl
+
     def new_code(self) -> str:
         self.code = "".join(secrets.choice(ALPHABET) for _ in range(12))
         return f"{self.code[:4]}-{self.code[4:8]}-{self.code[8:]}"
@@ -203,8 +209,14 @@ class FakeAgent:
             if reply.type != WSMsgType.TEXT or not isinstance(protocol.decode(reply.data), protocol.HelloReply):
                 return socket
             await socket.send_str(protocol.encode(self._snapshot()))
-            async for _ in socket:
-                pass
+            async for frame in socket:
+                if frame.type == WSMsgType.TEXT and isinstance(
+                    request := protocol.decode(frame.data), protocol.PairingRemoveRequest
+                ):
+                    self.keys.discard(key)
+                    reply = protocol.PairingRemoveReply(id=str(uuid.uuid4()), reply_to=request.id)
+                    await socket.send_str(protocol.encode(reply))
+                    await socket.close()
         finally:
             self._sockets.discard(socket)
         return socket
