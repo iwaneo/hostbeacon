@@ -1,0 +1,18 @@
+[project]
+name = "hostbeacon-integration"
+version = "0.0.0"
+description = "Hostbeacon Home Assistant Integration (development tooling only)"
+requires-python = ">=3.14.2"
+
+[dependency-groups]
+dev = [
+    "pytest-homeassistant-custom-component==0.13.367",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"

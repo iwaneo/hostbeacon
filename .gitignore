@@ -1,0 +1,12 @@
+# Go
+/dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.coverage
+
+# Claude Code local settings
+.claude/settings.local.json
