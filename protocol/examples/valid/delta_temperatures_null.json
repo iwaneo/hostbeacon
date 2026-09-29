@@ -1,0 +1,13 @@
+{
+  "description": "CPU temperature is unknown right now.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "temperatures": {
+        "cpu_celsius": null
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "description": "A delta from a newer minor with an unknown group next to a known one. Readers ignore the unknown group.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "temperatures": {
+        "cpu_celsius": 48
+      },
+      "gpu": {
+        "usage_percent": 12
+      }
+    }
+  },
+  "produced": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "temperatures": {
+        "cpu_celsius": 48
+      }
+    }
+  }
+}

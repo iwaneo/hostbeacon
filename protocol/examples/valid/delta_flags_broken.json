@@ -1,0 +1,17 @@
+{
+  "description": "Package system broken, a package task running, Reboot required.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "flags": {
+        "reboot_required": "yes",
+        "package_task_running": true,
+        "package_system_broken": true,
+        "package_system_fix_command": "sudo dpkg --configure -a",
+        "last_boot": "2026-09-20T08:01:13Z"
+      }
+    }
+  }
+}

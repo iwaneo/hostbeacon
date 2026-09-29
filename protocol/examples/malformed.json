@@ -1,0 +1,77 @@
+[
+  {
+    "name": "not_json",
+    "description": "The frame is not JSON.",
+    "frame": "not json"
+  },
+  {
+    "name": "not_an_object",
+    "description": "A message is a JSON object.",
+    "frame": "[]"
+  },
+  {
+    "name": "no_type",
+    "description": "Every message has a type.",
+    "frame": "{\"id\": \"a\", \"kind\": \"event\"}"
+  },
+  {
+    "name": "empty_id",
+    "description": "The id must not be empty.",
+    "frame": "{\"type\": \"delta\", \"id\": \"\", \"kind\": \"event\", \"groups\": {}}"
+  },
+  {
+    "name": "bad_kind",
+    "description": "kind is request, reply, or event.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"later\", \"groups\": {}}"
+  },
+  {
+    "name": "no_reply_to",
+    "description": "A reply names the request it answers.",
+    "frame": "{\"type\": \"unsupported\", \"id\": \"a\", \"kind\": \"reply\", \"request_type\": \"x\"}"
+  },
+  {
+    "name": "known_type_wrong_kind",
+    "description": "A known type must use its own kind.",
+    "frame": "{\"type\": \"snapshot\", \"id\": \"a\", \"kind\": \"request\", \"groups\": {}}"
+  },
+  {
+    "name": "missing_field",
+    "description": "A known message needs every required field.",
+    "frame": "{\"type\": \"action_request\", \"id\": \"a\", \"kind\": \"request\", \"action\": \"reboot\", \"user\": null}"
+  },
+  {
+    "name": "missing_nested_field",
+    "description": "Required fields inside groups count too.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {\"temperatures\": {}}}"
+  },
+  {
+    "name": "wrong_value_type",
+    "description": "Values must have the right JSON type.",
+    "frame": "{\"type\": \"action_request\", \"id\": \"a\", \"kind\": \"request\", \"action_id\": \"x\", \"action\": 5, \"user\": null}"
+  },
+  {
+    "name": "unknown_enum_value",
+    "description": "Fixed value lists are closed within a major.",
+    "frame": "{\"type\": \"action_request\", \"id\": \"a\", \"kind\": \"request\", \"action_id\": \"x\", \"action\": \"shutdown\", \"user\": null}"
+  },
+  {
+    "name": "unknown_enum_value_in_list",
+    "description": "Also inside lists.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {\"agent\": {\"hostname\": \"h\", \"agent_version\": \"1\", \"newest_agent_version\": null, \"capabilities\": [], \"enabled_actions\": [\"shutdown\"]}}}"
+  },
+  {
+    "name": "null_text",
+    "description": "null only where the schema allows it.",
+    "frame": "{\"type\": \"unsupported\", \"id\": \"a\", \"kind\": \"reply\", \"reply_to\": \"b\", \"request_type\": null}"
+  },
+  {
+    "name": "null_list",
+    "description": "Lists are never null.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {\"disks\": {\"mounts\": null}}}"
+  },
+  {
+    "name": "null_object",
+    "description": "Required objects are never null.",
+    "frame": "{\"type\": \"snapshot\", \"id\": \"a\", \"kind\": \"event\", \"groups\": null}"
+  }
+]

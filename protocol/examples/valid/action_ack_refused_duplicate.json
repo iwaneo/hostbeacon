@@ -1,0 +1,16 @@
+{
+  "description": "Refused as a repeated Action ID, with the first request's result.",
+  "message": {
+    "type": "action_ack",
+    "id": "agent-9",
+    "kind": "reply",
+    "reply_to": "ha-7",
+    "action_id": "d4c3b2a1-9f8e-4d7c-b6a5-493827160a5b",
+    "status": "refused",
+    "reason": "duplicate",
+    "first_result": {
+      "result": "failed",
+      "error": "health check failed, rolled back"
+    }
+  }
+}

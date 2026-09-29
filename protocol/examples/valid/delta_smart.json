@@ -1,0 +1,26 @@
+{
+  "description": "SMART group changed.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "smart": {
+        "disks": [
+          {
+            "device": "nvme0n1",
+            "health": "ok",
+            "temperature_celsius": 39,
+            "wear_percent": 4
+          },
+          {
+            "device": "sda",
+            "health": "failing",
+            "temperature_celsius": 44,
+            "wear_percent": null
+          }
+        ]
+      }
+    }
+  }
+}

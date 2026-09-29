@@ -1,0 +1,13 @@
+{
+  "description": "Disks group with no mounts left: every mount is gone.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "disks": {
+        "mounts": []
+      }
+    }
+  }
+}

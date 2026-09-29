@@ -1,0 +1,150 @@
+{
+  "description": "Full snapshot from a Host with every capability.",
+  "message": {
+    "type": "snapshot",
+    "id": "agent-2",
+    "kind": "event",
+    "groups": {
+      "agent": {
+        "hostname": "nas",
+        "agent_version": "1.0.0",
+        "newest_agent_version": "1.1.0",
+        "capabilities": [
+          "load",
+          "temperatures",
+          "disks",
+          "network",
+          "failed_services",
+          "containers",
+          "smart",
+          "available_updates"
+        ],
+        "enabled_actions": [
+          "reboot",
+          "update_run",
+          "agent_update"
+        ]
+      },
+      "system": {
+        "cpu_percent": 7,
+        "memory_percent": 41,
+        "memory_used_bytes": 3421765632,
+        "swap_percent": 0,
+        "load_1": 0.42,
+        "load_5": 0.35,
+        "load_15": 0.3
+      },
+      "disks": {
+        "mounts": [
+          {
+            "mount": "/",
+            "used_percent": 38,
+            "free_bytes": 61203521536,
+            "total_bytes": 98692743168
+          },
+          {
+            "mount": "/srv/data",
+            "used_percent": 71,
+            "free_bytes": 1152921504606,
+            "total_bytes": 3985729650688
+          }
+        ]
+      },
+      "network": {
+        "interfaces": [
+          {
+            "name": "enp3s0",
+            "rx_bytes_per_second": 12300,
+            "tx_bytes_per_second": 4560,
+            "rx_bytes_total": 91827364512,
+            "tx_bytes_total": 12837465109
+          }
+        ]
+      },
+      "temperatures": {
+        "cpu_celsius": 48
+      },
+      "failed_services": {
+        "count": 1,
+        "names": [
+          "backup.service"
+        ]
+      },
+      "containers": {
+        "count": 3,
+        "running": 1,
+        "stopped": 1,
+        "unhealthy": 1,
+        "items": [
+          {
+            "name": "jellyfin",
+            "state": "running"
+          },
+          {
+            "name": "old-db",
+            "state": "stopped"
+          },
+          {
+            "name": "paperless",
+            "state": "unhealthy"
+          }
+        ]
+      },
+      "smart": {
+        "disks": [
+          {
+            "device": "nvme0n1",
+            "health": "ok",
+            "temperature_celsius": 39,
+            "wear_percent": 4
+          },
+          {
+            "device": "sda",
+            "health": "failing",
+            "temperature_celsius": 44,
+            "wear_percent": null
+          }
+        ]
+      },
+      "available_updates": {
+        "count": 2,
+        "packages": [
+          {
+            "name": "openssl",
+            "installed_version": "3.5.1-1",
+            "new_version": "3.5.1-1+deb13u1"
+          },
+          {
+            "name": "tzdata",
+            "installed_version": "2025b-4",
+            "new_version": "2025b-4+deb13u1"
+          }
+        ],
+        "fingerprint": "sha256:5f1c3a9e0b7d2c4f",
+        "last_refresh": "2026-09-29T03:12:44Z"
+      },
+      "update_run": {
+        "run_id": null,
+        "state": "idle",
+        "percent": null,
+        "started_at": null,
+        "finished_at": null,
+        "result": null,
+        "installed": null,
+        "remaining": null,
+        "error": null,
+        "needs_manual_update": {
+          "count": 0,
+          "names": []
+        }
+      },
+      "flags": {
+        "reboot_required": "no",
+        "package_task_running": false,
+        "package_system_broken": false,
+        "package_system_fix_command": null,
+        "last_boot": "2026-09-20T08:01:13Z"
+      }
+    }
+  }
+}

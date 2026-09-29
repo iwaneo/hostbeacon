@@ -1,0 +1,10 @@
+{
+  "description": "A reply with a type this version does not know. The receiver ignores it and does not reply.",
+  "message": {
+    "type": "future_reply",
+    "id": "agent-41",
+    "kind": "reply",
+    "reply_to": "ha-22"
+  },
+  "reply": null
+}

@@ -1,0 +1,60 @@
+{
+  "description": "Snapshot from an LXC container: only the required groups plus disks, values unknown right now are null.",
+  "message": {
+    "type": "snapshot",
+    "id": "agent-2",
+    "kind": "event",
+    "groups": {
+      "agent": {
+        "hostname": "nas",
+        "agent_version": "1.0.0",
+        "newest_agent_version": null,
+        "capabilities": [
+          "disks"
+        ],
+        "enabled_actions": []
+      },
+      "system": {
+        "cpu_percent": null,
+        "memory_percent": 12,
+        "memory_used_bytes": null,
+        "swap_percent": null,
+        "load_1": null,
+        "load_5": null,
+        "load_15": null
+      },
+      "disks": {
+        "mounts": [
+          {
+            "mount": "/",
+            "used_percent": null,
+            "free_bytes": null,
+            "total_bytes": null
+          }
+        ]
+      },
+      "update_run": {
+        "run_id": null,
+        "state": "idle",
+        "percent": null,
+        "started_at": null,
+        "finished_at": null,
+        "result": null,
+        "installed": null,
+        "remaining": null,
+        "error": null,
+        "needs_manual_update": {
+          "count": 0,
+          "names": []
+        }
+      },
+      "flags": {
+        "reboot_required": "unknown",
+        "package_task_running": false,
+        "package_system_broken": false,
+        "package_system_fix_command": null,
+        "last_boot": null
+      }
+    }
+  }
+}

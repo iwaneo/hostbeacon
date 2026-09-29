@@ -1,0 +1,489 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iwaneo/hostbeacon/protocol/schema.json",
+  "title": "Hostbeacon Agent-Integration protocol",
+  "description": "Every JSON text frame on the WebSocket between the Agent and the Integration. Rules: docs/spec/v1.md section 6. Unknown fields are allowed everywhere and ignored by readers. A message with an unknown type only has to match the envelope.",
+  "x-protocol-version": "1.0",
+  "$ref": "#/$defs/message",
+  "$defs": {
+    "message": {
+      "type": "object",
+      "required": ["type", "id", "kind"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "#/$defs/message_id" },
+        "kind": { "enum": ["request", "reply", "event"] },
+        "reply_to": {
+          "$ref": "#/$defs/message_id",
+          "description": "The id of the request this reply answers. Required when kind is reply."
+        }
+      },
+      "if": { "properties": { "kind": { "const": "reply" } }, "required": ["kind"] },
+      "then": { "required": ["reply_to"] },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "hello" } }, "required": ["type"] },
+          "then": { "anyOf": [{ "$ref": "#/$defs/hello_request" }, { "$ref": "#/$defs/hello_reply" }] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "snapshot" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/snapshot" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "delta" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/delta" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "action_request" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/action_request" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "action_ack" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/action_ack" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "action_result" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/action_result" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "pairing_remove" } }, "required": ["type"] },
+          "then": {
+            "anyOf": [{ "$ref": "#/$defs/pairing_remove_request" }, { "$ref": "#/$defs/pairing_remove_reply" }]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "unsupported" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/unsupported" }
+        }
+      ]
+    },
+
+    "message_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "time": {
+      "description": "UTC time in RFC 3339 form, always ending in Z.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "nullable_time": { "anyOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+    "nullable_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "nullable_bytes": { "type": ["integer", "null"], "minimum": 0 },
+    "nullable_count": { "type": ["integer", "null"], "minimum": 0 },
+    "nullable_text": { "type": ["string", "null"] },
+    "protocol_version": {
+      "description": "The sender's protocol version as major.minor.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "protocol_majors": {
+      "description": "Every protocol major the sender supports.",
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "action": { "enum": ["reboot", "update_run", "agent_update"] },
+    "refusal_reason": {
+      "description": "not_allowed and unknown_target are reserved and unused in v1.",
+      "enum": [
+        "disabled",
+        "busy",
+        "update_run_running",
+        "too_soon_after_boot",
+        "cannot_log",
+        "duplicate",
+        "not_allowed",
+        "unknown_target"
+      ]
+    },
+    "name_list": {
+      "description": "A count of the full set plus a list capped at 100 names. When count is larger than the list, the list was capped.",
+      "type": "object",
+      "required": ["count", "names"],
+      "properties": {
+        "count": { "$ref": "#/$defs/nullable_count" },
+        "names": { "type": "array", "items": { "type": "string" }, "maxItems": 100 }
+      }
+    },
+
+    "agent_info": {
+      "type": "object",
+      "required": ["hostname", "agent_version", "newest_agent_version", "capabilities", "enabled_actions"],
+      "properties": {
+        "hostname": { "type": "string" },
+        "agent_version": { "type": "string" },
+        "newest_agent_version": {
+          "description": "From the Agent's signed release check. null when not known.",
+          "$ref": "#/$defs/nullable_text"
+        },
+        "capabilities": {
+          "description": "Data sources that work on this Host. v1 values: load, temperatures, disks, network, failed_services, containers, smart, available_updates. Readers ignore values they do not know. A missing value means not supported here.",
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "enabled_actions": {
+          "description": "Actions the owner enabled in the Host config.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/action" },
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "hello_request": {
+      "description": "Sent by the Agent after TLS and the key check.",
+      "allOf": [{ "$ref": "#/$defs/agent_info" }],
+      "required": [
+        "protocol_version",
+        "protocol_majors",
+        "instance_id",
+        "run_id",
+        "copied_from",
+        "environment",
+        "distro",
+        "architecture",
+        "kernel"
+      ],
+      "properties": {
+        "kind": { "const": "request" },
+        "protocol_version": { "$ref": "#/$defs/protocol_version" },
+        "protocol_majors": { "$ref": "#/$defs/protocol_majors" },
+        "instance_id": { "$ref": "#/$defs/uuid" },
+        "run_id": { "$ref": "#/$defs/uuid", "description": "New at every Agent start." },
+        "copied_from": {
+          "description": "Known IDs from before the last copy reset. Often empty.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "environment": { "enum": ["bare_metal", "vm", "lxc", null] },
+        "distro": {
+          "type": "object",
+          "required": ["id", "name", "version"],
+          "properties": {
+            "id": { "$ref": "#/$defs/nullable_text", "description": "ID from /etc/os-release, for example debian." },
+            "name": { "$ref": "#/$defs/nullable_text", "description": "NAME from /etc/os-release." },
+            "version": {
+              "$ref": "#/$defs/nullable_text",
+              "description": "VERSION_ID from /etc/os-release. null on rolling distros."
+            }
+          }
+        },
+        "architecture": { "type": "string", "description": "amd64 or arm64 in v1." },
+        "kernel": { "$ref": "#/$defs/nullable_text" }
+      }
+    },
+    "hello_reply": {
+      "description": "The Integration's answer to hello.",
+      "required": ["integration_version", "protocol_version", "protocol_majors"],
+      "properties": {
+        "kind": { "const": "reply" },
+        "integration_version": { "type": "string" },
+        "protocol_version": { "$ref": "#/$defs/protocol_version" },
+        "protocol_majors": { "$ref": "#/$defs/protocol_majors" }
+      }
+    },
+
+    "groups": {
+      "description": "State groups. Each group present is complete and replaces the old one.",
+      "type": "object",
+      "properties": {
+        "agent": { "$ref": "#/$defs/agent_info" },
+        "system": { "$ref": "#/$defs/system_group" },
+        "disks": { "$ref": "#/$defs/disks_group" },
+        "network": { "$ref": "#/$defs/network_group" },
+        "temperatures": { "$ref": "#/$defs/temperatures_group" },
+        "failed_services": { "$ref": "#/$defs/name_list" },
+        "containers": { "$ref": "#/$defs/containers_group" },
+        "smart": { "$ref": "#/$defs/smart_group" },
+        "available_updates": { "$ref": "#/$defs/available_updates_group" },
+        "update_run": { "$ref": "#/$defs/update_run_group" },
+        "flags": { "$ref": "#/$defs/flags_group" }
+      }
+    },
+    "system_group": {
+      "type": "object",
+      "required": [
+        "cpu_percent",
+        "memory_percent",
+        "memory_used_bytes",
+        "swap_percent",
+        "load_1",
+        "load_5",
+        "load_15"
+      ],
+      "properties": {
+        "cpu_percent": { "$ref": "#/$defs/nullable_percent" },
+        "memory_percent": { "$ref": "#/$defs/nullable_percent" },
+        "memory_used_bytes": { "$ref": "#/$defs/nullable_bytes" },
+        "swap_percent": { "$ref": "#/$defs/nullable_percent" },
+        "load_1": { "type": ["number", "null"], "minimum": 0 },
+        "load_5": { "type": ["number", "null"], "minimum": 0 },
+        "load_15": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "disks_group": {
+      "type": "object",
+      "required": ["mounts"],
+      "properties": {
+        "mounts": {
+          "description": "Real mounts only.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["mount", "used_percent", "free_bytes", "total_bytes"],
+            "properties": {
+              "mount": { "type": "string" },
+              "used_percent": { "$ref": "#/$defs/nullable_percent" },
+              "free_bytes": { "$ref": "#/$defs/nullable_bytes" },
+              "total_bytes": { "$ref": "#/$defs/nullable_bytes" }
+            }
+          }
+        }
+      }
+    },
+    "network_group": {
+      "type": "object",
+      "required": ["interfaces"],
+      "properties": {
+        "interfaces": {
+          "description": "Physical interfaces only.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "rx_bytes_per_second", "tx_bytes_per_second", "rx_bytes_total", "tx_bytes_total"],
+            "properties": {
+              "name": { "type": "string" },
+              "rx_bytes_per_second": { "type": ["number", "null"], "minimum": 0 },
+              "tx_bytes_per_second": { "type": ["number", "null"], "minimum": 0 },
+              "rx_bytes_total": { "$ref": "#/$defs/nullable_bytes" },
+              "tx_bytes_total": { "$ref": "#/$defs/nullable_bytes" }
+            }
+          }
+        }
+      }
+    },
+    "temperatures_group": {
+      "type": "object",
+      "required": ["cpu_celsius"],
+      "properties": { "cpu_celsius": { "type": ["number", "null"] } }
+    },
+    "containers_group": {
+      "description": "Counts cover every container. items is capped at 100.",
+      "type": "object",
+      "required": ["count", "running", "stopped", "unhealthy", "items"],
+      "properties": {
+        "count": { "$ref": "#/$defs/nullable_count" },
+        "running": { "$ref": "#/$defs/nullable_count" },
+        "stopped": { "$ref": "#/$defs/nullable_count" },
+        "unhealthy": { "$ref": "#/$defs/nullable_count" },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": ["name", "state"],
+            "properties": {
+              "name": { "type": "string" },
+              "state": { "enum": ["running", "stopped", "unhealthy"] }
+            }
+          }
+        }
+      }
+    },
+    "smart_group": {
+      "type": "object",
+      "required": ["disks"],
+      "properties": {
+        "disks": {
+          "description": "Physical disks only.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["device", "health", "temperature_celsius", "wear_percent"],
+            "properties": {
+              "device": { "type": "string" },
+              "health": { "enum": ["ok", "failing", null] },
+              "temperature_celsius": { "type": ["number", "null"] },
+              "wear_percent": { "$ref": "#/$defs/nullable_percent", "description": "SSD only; null on other disks." }
+            }
+          }
+        }
+      }
+    },
+    "available_updates_group": {
+      "type": "object",
+      "required": ["count", "packages", "fingerprint", "last_refresh"],
+      "properties": {
+        "count": { "$ref": "#/$defs/nullable_count" },
+        "packages": {
+          "description": "Capped at 100. When count is larger, the list was capped.",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": ["name", "installed_version", "new_version"],
+            "properties": {
+              "name": { "type": "string" },
+              "installed_version": { "type": "string" },
+              "new_version": { "type": "string" }
+            }
+          }
+        },
+        "fingerprint": {
+          "description": "A hash of the full set of Available updates.",
+          "$ref": "#/$defs/nullable_text"
+        },
+        "last_refresh": {
+          "description": "Time of the last successful package list refresh.",
+          "$ref": "#/$defs/nullable_time"
+        }
+      }
+    },
+    "update_run_group": {
+      "description": "The Update run record kept on the Host. Sent in every snapshot.",
+      "type": "object",
+      "required": [
+        "run_id",
+        "state",
+        "percent",
+        "started_at",
+        "finished_at",
+        "result",
+        "installed",
+        "remaining",
+        "error",
+        "needs_manual_update"
+      ],
+      "properties": {
+        "run_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }], "description": "null when no run yet." },
+        "state": { "enum": ["idle", "waiting_for_lock", "running", "finished", "result_unknown"] },
+        "percent": { "$ref": "#/$defs/nullable_percent", "description": "Only while running, and only when the package tool gives one." },
+        "started_at": { "$ref": "#/$defs/nullable_time" },
+        "finished_at": { "$ref": "#/$defs/nullable_time" },
+        "result": {
+          "description": "needs_manual_update: the run stopped before installing because packages would be removed or the distro release would change.",
+          "enum": ["ok", "failed", "needs_manual_update", null]
+        },
+        "installed": { "$ref": "#/$defs/nullable_count" },
+        "remaining": { "$ref": "#/$defs/nullable_count" },
+        "error": { "type": ["string", "null"], "maxLength": 200 },
+        "needs_manual_update": { "$ref": "#/$defs/name_list" }
+      }
+    },
+    "flags_group": {
+      "type": "object",
+      "required": [
+        "reboot_required",
+        "package_task_running",
+        "package_system_broken",
+        "package_system_fix_command",
+        "last_boot"
+      ],
+      "properties": {
+        "reboot_required": { "enum": ["yes", "no", "unknown"] },
+        "package_task_running": { "type": "boolean" },
+        "package_system_broken": { "type": "boolean" },
+        "package_system_fix_command": {
+          "description": "The command to run when the package system is broken, else null.",
+          "$ref": "#/$defs/nullable_text"
+        },
+        "last_boot": { "$ref": "#/$defs/nullable_time" }
+      }
+    },
+
+    "snapshot": {
+      "description": "Full state, sent after hello. Groups for missing capabilities are left out.",
+      "required": ["groups"],
+      "properties": {
+        "kind": { "const": "event" },
+        "groups": {
+          "allOf": [{ "$ref": "#/$defs/groups" }],
+          "required": ["agent", "system", "update_run", "flags"]
+        }
+      }
+    },
+    "delta": {
+      "description": "Only the changed groups.",
+      "required": ["groups"],
+      "properties": {
+        "kind": { "const": "event" },
+        "groups": { "allOf": [{ "$ref": "#/$defs/groups" }], "minProperties": 1 }
+      }
+    },
+
+    "action_outcome": {
+      "type": "object",
+      "required": ["result", "error"],
+      "properties": {
+        "result": { "enum": ["ok", "failed"] },
+        "error": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "action_request": {
+      "description": "Sent by the Integration. No target field in v1.",
+      "required": ["action_id", "action", "user"],
+      "properties": {
+        "kind": { "const": "request" },
+        "action_id": { "$ref": "#/$defs/uuid", "description": "Made by Home Assistant. Repeats are refused." },
+        "action": { "$ref": "#/$defs/action" },
+        "user": { "$ref": "#/$defs/nullable_text", "description": "The HA user name, or null for no HA user." }
+      }
+    },
+    "action_ack": {
+      "description": "The Agent's reply to action_request.",
+      "required": ["action_id", "status", "reason", "first_result"],
+      "properties": {
+        "kind": { "const": "reply" },
+        "action_id": { "$ref": "#/$defs/uuid" },
+        "status": { "enum": ["accepted", "refused"] },
+        "reason": { "anyOf": [{ "$ref": "#/$defs/refusal_reason" }, { "type": "null" }] },
+        "first_result": {
+          "description": "For a duplicate: the first request's outcome if known, else null.",
+          "anyOf": [{ "$ref": "#/$defs/action_outcome" }, { "type": "null" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "refused" } }, "required": ["status"] },
+          "then": { "properties": { "reason": { "$ref": "#/$defs/refusal_reason" } } },
+          "else": { "properties": { "reason": { "const": null } } }
+        },
+        {
+          "if": { "properties": { "reason": { "const": "duplicate" } }, "required": ["reason"] },
+          "else": { "properties": { "first_result": { "const": null } } }
+        }
+      ]
+    },
+    "action_result": {
+      "description": "The later result of an accepted Action. An Update run reports through the update_run group instead.",
+      "allOf": [{ "$ref": "#/$defs/action_outcome" }],
+      "required": ["action_id", "action"],
+      "properties": {
+        "kind": { "const": "event" },
+        "action_id": { "$ref": "#/$defs/uuid" },
+        "action": { "$ref": "#/$defs/action" }
+      }
+    },
+    "pairing_remove_request": {
+      "description": "Sent by the Integration. Removes the Pairing this connection logged in with.",
+      "properties": { "kind": { "const": "request" } }
+    },
+    "pairing_remove_reply": {
+      "description": "The Agent confirms that the Pairing key is deleted.",
+      "properties": { "kind": { "const": "reply" } }
+    },
+    "unsupported": {
+      "description": "Reply to a request whose type the receiver does not know. The connection stays open.",
+      "required": ["request_type"],
+      "properties": {
+        "kind": { "const": "reply" },
+        "request_type": { "type": "string" }
+      }
+    }
+  }
+}

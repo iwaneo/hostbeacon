@@ -1,0 +1,9 @@
+{
+  "description": "unsupported names the request type.",
+  "message": {
+    "type": "unsupported",
+    "id": "agent-31",
+    "kind": "reply",
+    "reply_to": "ha-21"
+  }
+}

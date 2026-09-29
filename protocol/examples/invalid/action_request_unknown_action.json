@@ -1,0 +1,11 @@
+{
+  "description": "Only the three v1 Actions.",
+  "message": {
+    "type": "action_request",
+    "id": "ha-7",
+    "kind": "request",
+    "action_id": "d4c3b2a1-9f8e-4d7c-b6a5-493827160a5b",
+    "action": "shutdown",
+    "user": null
+  }
+}

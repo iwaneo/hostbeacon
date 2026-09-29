@@ -1,0 +1,9 @@
+{
+  "description": "A delta carries at least one group.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {}
+  }
+}

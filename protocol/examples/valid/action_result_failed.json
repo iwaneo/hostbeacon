@@ -1,0 +1,12 @@
+{
+  "description": "Reboot could not start.",
+  "message": {
+    "type": "action_result",
+    "id": "agent-12",
+    "kind": "event",
+    "action_id": "d4c3b2a1-9f8e-4d7c-b6a5-493827160a5b",
+    "action": "reboot",
+    "result": "failed",
+    "error": "systemctl reboot exited with status 1"
+  }
+}

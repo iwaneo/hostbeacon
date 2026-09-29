@@ -1,0 +1,16 @@
+{
+  "description": "Only a duplicate carries the first result.",
+  "message": {
+    "type": "action_ack",
+    "id": "agent-9",
+    "kind": "reply",
+    "reply_to": "ha-7",
+    "action_id": "d4c3b2a1-9f8e-4d7c-b6a5-493827160a5b",
+    "status": "refused",
+    "reason": "busy",
+    "first_result": {
+      "result": "ok",
+      "error": null
+    }
+  }
+}

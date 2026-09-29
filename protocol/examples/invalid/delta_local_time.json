@@ -1,0 +1,17 @@
+{
+  "description": "Times are UTC and end in Z.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "flags": {
+        "reboot_required": "no",
+        "package_task_running": false,
+        "package_system_broken": false,
+        "package_system_fix_command": null,
+        "last_boot": "2026-09-20T10:01:13+02:00"
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "description": "A reply must say which request it answers.",
+  "message": {
+    "type": "pairing_remove",
+    "id": "agent-30",
+    "kind": "reply"
+  }
+}

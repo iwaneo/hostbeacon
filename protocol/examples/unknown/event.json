@@ -1,0 +1,10 @@
+{
+  "description": "An event with a type this version does not know. The receiver ignores it and does not reply.",
+  "message": {
+    "type": "gpu_changed",
+    "id": "agent-40",
+    "kind": "event",
+    "usage_percent": 12
+  },
+  "reply": null
+}

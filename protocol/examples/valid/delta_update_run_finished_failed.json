@@ -1,0 +1,25 @@
+{
+  "description": "Update run finished and failed, with a short error.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "update_run": {
+        "run_id": "8a7b6c5d-4e3f-4a1b-9c0d-e1f2a3b4c5d6",
+        "state": "finished",
+        "percent": null,
+        "started_at": "2026-09-29T10:00:00Z",
+        "finished_at": "2026-09-29T10:04:31Z",
+        "result": "failed",
+        "installed": 3,
+        "remaining": 1,
+        "error": "dpkg returned an error code (1)",
+        "needs_manual_update": {
+          "count": 0,
+          "names": []
+        }
+      }
+    }
+  }
+}

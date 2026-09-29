@@ -1,0 +1,8 @@
+{
+  "description": "The Integration removes the Pairing it logged in with.",
+  "message": {
+    "type": "pairing_remove",
+    "id": "ha-20",
+    "kind": "request"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "description": "A request with a type this version does not know. The receiver replies unsupported and keeps the connection open.",
+  "message": {
+    "type": "restart_service",
+    "id": "ha-21",
+    "kind": "request",
+    "service": "nginx.service"
+  },
+  "reply": {
+    "type": "unsupported",
+    "id": "agent-31",
+    "kind": "reply",
+    "reply_to": "ha-21",
+    "request_type": "restart_service"
+  }
+}
