@@ -18,7 +18,6 @@ The design is in [the v1 spec](docs/spec/v1.md) and
 
 - Agent: `cd agent && go test ./...`
 - Integration: `uv run pytest`
-- Translations: `python3 scripts/check_translations.py`
 - Protocol schema and shared examples: [`protocol/`](protocol/README.md)
 
 ## Security

@@ -1,0 +1,10 @@
+{
+  "description": "Pairing step test vector. All byte values are hex. See README.md, Pairing.",
+  "code": "K7QM-4XPT-9RWD",
+  "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "fingerprint": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+  "key": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+  "code_key": "11b4dcdaa7ddbaad982aa5295ffd6e58ed0ad80eb50e46ad454c2c588fa18417",
+  "home_assistant_proof": "88234e06e28b910bcd9f8d803981fc3860700554758ceee45a411bb2c0aacaa3",
+  "agent_proof": "21c93ce51091303e1fb993b2041c9f05ea22f7f21e1f85206fdee873a99eaf79"
+}
