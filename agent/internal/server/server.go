@@ -61,12 +61,28 @@ type Server struct {
 	MaxUnauthenticated          int
 	MaxUnauthenticatedPerSource int
 	UnauthenticatedTimeout      time.Duration
+
+	// Limits per Pairing, and how often the Pairings file is checked for
+	// Pairings an owner command removed. Zero means the default.
+	MaxConnectionsPerPairing int
+	MessagesPerMinute        int
+	ActionsPerMinute         int
+	PairingCheckInterval     time.Duration
+
+	sessions *sessions
 }
 
 type connKey struct{}
 
 // Serve answers connections on l until ctx ends.
 func (s *Server) Serve(ctx context.Context, l net.Listener) error {
+	s.sessions = &sessions{
+		maxConnections:    orDefault(s.MaxConnectionsPerPairing, defaultMaxConnectionsPerPairing),
+		messagesPerMinute: orDefault(s.MessagesPerMinute, defaultMessagesPerMinute),
+		actionsPerMinute:  orDefault(s.ActionsPerMinute, defaultActionsPerMinute),
+		pairings:          map[string]*pairingState{},
+	}
+	go s.watchPairings(ctx, orDefault(s.PairingCheckInterval, defaultPairingCheckInterval))
 	timeout := orDefault(s.UnauthenticatedTimeout, defaultUnauthenticatedTimeout)
 	limited := &listener{
 		Listener:  l,
@@ -192,7 +208,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(header, bearerPrefix) || err != nil {
 		key = nil
 	}
-	name, ok, err := s.Pairings.Login(key)
+	login, ok, err := s.Pairings.Login(key)
 	if err != nil {
 		s.Log.Error("cannot check the Pairing key; refusing the connection", "error", err)
 		http.Error(w, "error", http.StatusServiceUnavailable)
@@ -203,22 +219,30 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !s.sessions.open(login.ID) {
+		s.Log.Warn("refused a connection: too many open connections for this Pairing", "pairing", login.Name, "source", r.RemoteAddr)
+		http.Error(w, "too many connections", http.StatusTooManyRequests)
+		return
+	}
 	if conn, found := r.Context().Value(connKey{}).(*countedConn); found {
 		conn.loggedIn()
 	}
 	ws, err := websocket.Accept(w, r, nil)
 	if err != nil {
+		s.sessions.closed(login.ID, nil)
 		s.Log.Warn("WebSocket upgrade failed", "source", r.RemoteAddr, "error", err)
 		return
 	}
-	s.Log.Info("Home Assistant connected", "pairing", name, "source", r.RemoteAddr)
-	err = s.session(r.Context(), ws)
-	s.Log.Info("Home Assistant disconnected", "pairing", name, "reason", err)
+	s.sessions.started(login.ID, ws)
+	defer s.sessions.closed(login.ID, ws)
+	s.Log.Info("Home Assistant connected", "pairing", login.Name, "source", r.RemoteAddr)
+	err = s.session(r.Context(), ws, login)
+	s.Log.Info("Home Assistant disconnected", "pairing", login.Name, "reason", err)
 }
 
 // session runs one logged-in connection: hello, then a snapshot, then a
 // delta each time the state changes.
-func (s *Server) session(ctx context.Context, ws *websocket.Conn) error {
+func (s *Server) session(ctx context.Context, ws *websocket.Conn, login pairing.Pairing) error {
 	defer ws.CloseNow()
 	ws.SetReadLimit(maxFrameBytes)
 	ctx, cancel := context.WithCancel(ctx)
@@ -235,7 +259,7 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn) error {
 
 	replies := make(chan *protocol.HelloReply, 1)
 	readDone := make(chan error, 1)
-	go func() { readDone <- s.read(ctx, ws, hello.ID, replies) }()
+	go func() { readDone <- s.read(ctx, ws, login, hello.ID, replies) }()
 
 	select {
 	case reply := <-replies:
@@ -299,7 +323,7 @@ func snapshotGroups(hello protocol.HelloRequest, groups protocol.Groups) protoco
 }
 
 // read handles the messages Home Assistant sends until the connection ends.
-func (s *Server) read(ctx context.Context, ws *websocket.Conn, helloID string, replies chan<- *protocol.HelloReply) error {
+func (s *Server) read(ctx context.Context, ws *websocket.Conn, login pairing.Pairing, helloID string, replies chan<- *protocol.HelloReply) error {
 	for {
 		messageType, frame, err := ws.Read(ctx)
 		if err != nil {
@@ -310,6 +334,12 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn, helloID string, r
 			return errors.New("got a binary frame")
 		}
 		message, err := protocol.Decode(frame)
+		_, action := message.(*protocol.ActionRequest)
+		if !s.sessions.allowMessage(login.ID, action) {
+			s.Log.Warn("closed a connection: too many messages or Actions for this Pairing", "pairing", login.Name)
+			ws.Close(websocket.StatusPolicyViolation, "rate limit")
+			return errors.New("rate limit")
+		}
 		if err != nil {
 			s.Log.Warn("ignored a malformed message", "error", err)
 			continue
@@ -322,6 +352,8 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn, helloID string, r
 				default:
 				}
 			}
+		case *protocol.PairingRemoveRequest:
+			return s.removePairing(ctx, ws, login, m)
 		case *protocol.Unknown:
 			if reply, ok := protocol.UnsupportedReply(m, identity.NewUUID()); ok {
 				if err := send(ctx, ws, reply); err != nil {
@@ -330,6 +362,22 @@ func (s *Server) read(ctx context.Context, ws *websocket.Conn, helloID string, r
 			}
 		}
 	}
+}
+
+// removePairing deletes the Pairing this connection logged in with, confirms
+// it, and closes every connection of that Pairing. Other Pairings go on.
+func (s *Server) removePairing(ctx context.Context, ws *websocket.Conn, login pairing.Pairing, request *protocol.PairingRemoveRequest) error {
+	if _, err := s.Pairings.Remove(login.ID); err != nil && !errors.Is(err, pairing.ErrNotFound) {
+		s.Log.Error("cannot remove the Pairing Home Assistant asked to remove", "pairing", login.Name, "error", err)
+		ws.Close(websocket.StatusInternalError, "cannot remove the Pairing")
+		return err
+	}
+	s.Log.Info("Home Assistant removed its Pairing", "pairing", login.Name, "id", login.ID)
+	if err := send(ctx, ws, &protocol.PairingRemoveReply{ID: identity.NewUUID(), ReplyTo: request.ID}); err != nil {
+		return err
+	}
+	s.sessions.closePairing(login.ID)
+	return errors.New("Pairing removed")
 }
 
 func send(ctx context.Context, ws *websocket.Conn, message protocol.Message) error {

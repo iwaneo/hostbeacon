@@ -81,8 +81,8 @@ func TestPairingWithTheCodeGivesAKeyThatLogsIn(t *testing.T) {
 	if len(key) != 32 {
 		t.Fatalf("key has %d bytes, want 32", len(key))
 	}
-	if name, ok, _ := h.pairings.Login(key); !ok || name != "Home" {
-		t.Fatalf("Login = %q, %v; want Home, true", name, ok)
+	if p, ok, _ := h.pairings.Login(key); !ok || p.Name != "Home" {
+		t.Fatalf("Login = %+v, %v; want Home, true", p, ok)
 	}
 }
 
@@ -243,5 +243,129 @@ func TestPairingVector(t *testing.T) {
 	}
 	if !bytes.Equal(AgentProof(codeKey, b("fingerprint"), b("nonce"), b("key")), b("agent_proof")) {
 		t.Error("Agent proof does not match the vector")
+	}
+	if got := ID(b("key")); got != v["pairing_id"] {
+		t.Errorf("ID = %s, want %s", got, v["pairing_id"])
+	}
+}
+
+// login pairs with a new code and confirms the key, as Home Assistant does.
+func (h *host) login(t *testing.T, name string) []byte {
+	t.Helper()
+	nonce := make([]byte, 32)
+	rand.Read(nonce)
+	code := h.newCode(t)
+	key, _, err := h.pairings.Pair(name, fingerprint, nonce, HomeAssistantProof(CodeKey(code, nonce), fingerprint, nonce))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := h.pairings.Login(key); !ok || err != nil {
+		t.Fatalf("Login = %v, %v", ok, err)
+	}
+	return key
+}
+
+func TestListShowsEachPairingWithNameCreatedAndLastSeen(t *testing.T) {
+	h := newHost(t)
+	home := h.login(t, "Home")
+	h.now = start.Add(time.Hour)
+	h.login(t, "Office")
+	h.now = start.Add(2 * time.Hour)
+	h.pairings.Login(home)
+
+	list, err := h.pairings.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("List has %d Pairings, want 2", len(list))
+	}
+	if list[0].Name != "Home" || list[0].ID != ID(home) || !list[0].Created.Equal(start) || !list[0].LastSeen.Equal(start.Add(2*time.Hour)) {
+		t.Errorf("first = %+v", list[0])
+	}
+	if list[1].Name != "Office" || !list[1].Created.Equal(start.Add(time.Hour)) || !list[1].LastSeen.Equal(start.Add(time.Hour)) {
+		t.Errorf("second = %+v", list[1])
+	}
+}
+
+func TestIDIsEightHexCharacters(t *testing.T) {
+	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(ID(make([]byte, 32))) {
+		t.Errorf("ID = %q", ID(make([]byte, 32)))
+	}
+}
+
+func TestTwoPairingsWorkIndependently(t *testing.T) {
+	h := newHost(t)
+	home := h.login(t, "Home")
+	office := h.login(t, "Office")
+
+	removed, err := h.pairings.Remove(ID(home))
+	if err != nil || removed.Name != "Home" {
+		t.Fatalf("Remove = %+v, %v", removed, err)
+	}
+	if _, ok, _ := h.pairings.Login(home); ok {
+		t.Error("a removed key still logs in")
+	}
+	if p, ok, _ := h.pairings.Login(office); !ok || p.Name != "Office" {
+		t.Errorf("the other Pairing stopped working: %+v, %v", p, ok)
+	}
+}
+
+func TestRemoveByUniqueName(t *testing.T) {
+	h := newHost(t)
+	h.login(t, "Home")
+	office := h.login(t, "Office")
+	if _, err := h.pairings.Remove("Home"); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := h.pairings.List()
+	if len(list) != 1 || list[0].ID != ID(office) {
+		t.Errorf("List = %+v, want only Office", list)
+	}
+}
+
+func TestRemoveRefusesAnAmbiguousOrUnknownName(t *testing.T) {
+	h := newHost(t)
+	h.login(t, "Home")
+	h.login(t, "Home")
+	if _, err := h.pairings.Remove("Home"); !errors.Is(err, ErrAmbiguous) {
+		t.Errorf("err = %v, want ErrAmbiguous", err)
+	}
+	if _, err := h.pairings.Remove("nothing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	if list, _ := h.pairings.List(); len(list) != 2 {
+		t.Errorf("List has %d Pairings, want 2 (nothing removed)", len(list))
+	}
+}
+
+// A root owner command and the network part are two processes. A login in
+// one must not bring back a Pairing the other removed.
+func TestLoginInAnotherProcessDoesNotBringBackARemovedPairing(t *testing.T) {
+	h := newHost(t)
+	home := h.login(t, "Home")
+	owner := Open(h.dir, func() time.Time { return h.now })
+	if _, err := owner.Remove(ID(home)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := h.pairings.Login(home); ok {
+		t.Fatal("a key removed by another process still logs in")
+	}
+	if list, _ := owner.List(); len(list) != 0 {
+		t.Errorf("List = %+v, want none", list)
+	}
+}
+
+func TestStaleListsPairingsNotSeenFor90Days(t *testing.T) {
+	h := newHost(t)
+	h.login(t, "Old")
+	h.now = start.Add(89 * 24 * time.Hour)
+	h.login(t, "Recent")
+	h.now = start.Add(90 * 24 * time.Hour)
+
+	list, _ := h.pairings.List()
+	stale := Stale(list, h.now)
+	if len(stale) != 1 || stale[0].Name != "Old" {
+		t.Errorf("Stale = %+v, want only Old", stale)
 	}
 }

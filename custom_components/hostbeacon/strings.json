@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Add a Host",
@@ -22,15 +23,30 @@
         "data_description": {
           "code": "12 characters, for example K7QM-4XPT-9RWD. It works once, for 10 minutes."
         }
+      },
+      "reconfigure": {
+        "title": "Change the address of {host}",
+        "description": "Enter the new address of the Host. Home Assistant accepts it only if the Agent there has the same certificate as before.",
+        "data": {
+          "host": "Address",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "IP address or hostname of the Host.",
+          "port": "The Agent's port. Change it only if the Host owner changed it."
+        }
       }
     },
     "error": {
       "cannot_connect": "Cannot reach the Agent at this address. Check the address and the port, and that the Agent is running.",
       "invalid_code": "The Pairing code is wrong, expired, or already used. Make a new code on the Host and try again.",
-      "pairing_failed": "Pairing failed: the Agent did not prove that it knows the code. Check that this is the address of the right Host."
+      "pairing_failed": "Pairing failed: the Agent did not prove that it knows the code. Check that this is the address of the right Host.",
+      "certificate_changed": "The Agent at this address has a different certificate. If the Host was reinstalled, it must be paired again. Otherwise, check that this is the address of the right Host."
     },
     "abort": {
-      "already_configured": "This Host is already added."
+      "already_configured": "This Host is already added.",
+      "invalid_discovery_info": "This announcement is not from a Hostbeacon Agent.",
+      "reconfigure_successful": "The address was changed."
     }
   },
   "entity": {
@@ -156,6 +172,14 @@
       "last_seen": {
         "name": "Last seen"
       }
+    }
+  },
+  "exceptions": {
+    "pairing_not_removed_title": {
+      "message": "Host removed, but its Pairing is still on the Host"
+    },
+    "pairing_not_removed": {
+      "message": "Home Assistant could not reach {host} to remove its Pairing, so the Host still accepts this Home Assistant's key. On the Host, run:\n\n`sudo hostbeacon pairings remove {pairing_id}`"
     }
   }
 }

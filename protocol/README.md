@@ -70,12 +70,37 @@ check.
 The key stays pending on the Agent until its first login, and is dropped when
 the code expires. The Agent keeps only a SHA-256 hash of each key.
 
+The **Pairing ID** is the first 8 hex characters of `SHA-256(key)`.
+`hostbeacon pairings list` shows it, and Home Assistant works it out from its
+own key to show the command `hostbeacon pairings remove <ID>`.
+`pairing_vector.json` has the ID of its key.
+
 ### Login: `GET /v1/ws`
 
 A WebSocket upgrade with `Authorization: Bearer <key in base64>`, on a
-connection pinned to `fp`. An unknown key gets 401. After login the Agent
-sends `hello`; Home Assistant answers; then the Agent sends a `snapshot` and
-`delta` messages.
+connection pinned to `fp`. An unknown key gets 401. A Pairing with 4 open
+connections already gets 429. After login the Agent sends `hello`; Home
+Assistant answers; then the Agent sends a `snapshot` and `delta` messages.
+
+Per Pairing, the Agent allows 600 messages and 10 `action_request`s a minute
+(counted across reconnects while the Agent runs). Over a limit, it closes the
+connection with status 1008.
+
+### Removing a Pairing
+
+- `pairing_remove` (request, any time after login): the Agent deletes the
+  Pairing the connection logged in with, answers, and closes every connection
+  of that Pairing. Other Pairings go on.
+- `hostbeacon pairings remove <ID or name>` on the Host does the same; the
+  Agent closes that Pairing's connections within a second.
+
+## Discovery
+
+The Agent announces itself with mDNS as `_hostbeacon._tcp.local.`: instance
+name = hostname, port = the Agent's port, TXT `id` = the instance ID.
+Discovery is never trusted: it only offers to start Pairing. For a paired Host
+that is Offline, Home Assistant moves to the announced address only after it
+logs in there with the pinned certificate and the key.
 
 ## Changing the protocol
 

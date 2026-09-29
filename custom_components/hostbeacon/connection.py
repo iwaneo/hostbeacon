@@ -16,13 +16,14 @@ import logging
 import random
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 
 import aiohttp
 from homeassistant.util import dt as dt_util
 
 from . import protocol
-from .pairing import agent_url
+from .pairing import TIMEOUT, agent_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +34,75 @@ MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 INTEGRATION_VERSION = "0.0.0"
 
 
+def _hello_reply(hello: protocol.HelloRequest) -> protocol.HelloReply:
+    return protocol.HelloReply(
+        id=str(uuid.uuid4()),
+        reply_to=hello.id,
+        integration_version=INTEGRATION_VERSION,
+        protocol_version=protocol.PROTOCOL_VERSION,
+        protocol_majors=protocol.PROTOCOL_MAJORS,
+    )
+
+
+def _connect(
+    session: aiohttp.ClientSession,
+    host: str,
+    port: int,
+    fingerprint: bytes,
+    key: bytes,
+    heartbeat: float | None = None,
+) -> AbstractAsyncContextManager[aiohttp.ClientWebSocketResponse]:
+    """Open the WebSocket pinned to fingerprint and log in with key.
+
+    A different certificate is refused before anything is sent, so the key
+    never reaches it. Only the lasting connection needs a heartbeat.
+    """
+    return session.ws_connect(
+        agent_url(host, port, "/v1/ws", scheme="wss"),
+        ssl=aiohttp.Fingerprint(fingerprint),
+        headers={"Authorization": "Bearer " + base64.b64encode(key).decode()},
+        heartbeat=heartbeat,
+        max_msg_size=MAX_MESSAGE_BYTES,
+        timeout=aiohttp.ClientWSTimeout(ws_close=10),
+    )
+
+
+async def can_log_in(session: aiohttp.ClientSession, host: str, port: int, fingerprint: bytes, key: bytes) -> bool:
+    """Whether the Agent at host and port has the pinned certificate and accepts the key."""
+    try:
+        async with asyncio.timeout(TIMEOUT), _connect(session, host, port, fingerprint, key):
+            return True
+    except (aiohttp.ClientError, OSError, TimeoutError):
+        return False
+
+
+async def remove_pairing(session: aiohttp.ClientSession, host: str, port: int, fingerprint: bytes, key: bytes) -> bool:
+    """Ask the Agent to delete this Home Assistant's Pairing.
+
+    True when the Agent confirmed it, or no longer knows the key.
+    """
+    request_id = str(uuid.uuid4())
+    try:
+        async with asyncio.timeout(TIMEOUT), _connect(session, host, port, fingerprint, key) as ws:
+            async for frame in ws:
+                if frame.type != aiohttp.WSMsgType.TEXT:
+                    break
+                try:
+                    message = protocol.decode(frame.data)
+                except protocol.ProtocolError:
+                    continue
+                if isinstance(message, protocol.HelloRequest):
+                    await ws.send_str(protocol.encode(_hello_reply(message)))
+                    await ws.send_str(protocol.encode(protocol.PairingRemoveRequest(id=request_id)))
+                elif isinstance(message, protocol.PairingRemoveReply) and message.reply_to == request_id:
+                    return True
+    except aiohttp.WSServerHandshakeError as err:
+        return err.status == 401
+    except (aiohttp.ClientError, OSError, TimeoutError):
+        pass
+    return False
+
+
 class HostConnection:
     """The connection to one Agent and the latest state it sent."""
 
@@ -41,9 +111,9 @@ class HostConnection:
     ) -> None:
         self._session = session
         self._name = name
-        self._url = agent_url(host, port, "/v1/ws", scheme="wss")
-        self._fingerprint = aiohttp.Fingerprint(fingerprint)
-        self._authorization = "Bearer " + base64.b64encode(key).decode()
+        self._address = (host, port)
+        self._fingerprint = fingerprint
+        self._key = key
         self._listeners: list[Callable[[], None]] = []
         self._problem: str | None = None
         self.online = False
@@ -102,14 +172,7 @@ class HostConnection:
         self._changed()
 
     async def _session_once(self) -> None:
-        async with self._session.ws_connect(
-            self._url,
-            ssl=self._fingerprint,
-            headers={"Authorization": self._authorization},
-            heartbeat=HEARTBEAT,
-            max_msg_size=MAX_MESSAGE_BYTES,
-            timeout=aiohttp.ClientWSTimeout(ws_close=10),
-        ) as ws:
+        async with _connect(self._session, *self._address, self._fingerprint, self._key, HEARTBEAT) as ws:
             async for frame in ws:
                 if frame.type != aiohttp.WSMsgType.TEXT:
                     break
@@ -130,13 +193,7 @@ class HostConnection:
         match message:
             case protocol.HelloRequest():
                 self.hello = message
-                return protocol.HelloReply(
-                    id=str(uuid.uuid4()),
-                    reply_to=message.id,
-                    integration_version=INTEGRATION_VERSION,
-                    protocol_version=protocol.PROTOCOL_VERSION,
-                    protocol_majors=protocol.PROTOCOL_MAJORS,
-                )
+                return _hello_reply(message)
             case protocol.Snapshot():
                 self.groups = message.groups
                 self.online = True
