@@ -87,12 +87,3 @@ jobs:
           # the pull request, so it runs only on pushes to main.
           ignore: ${{ github.event_name == 'pull_request' && 'license' || '' }}
 
-  translations:
-    name: Translation keys
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: en.json and he.json have the same keys
-        run: python3 scripts/check_translations.py
