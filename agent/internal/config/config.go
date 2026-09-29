@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
+	"github.com/iwaneo/hostbeacon/agent/internal/statefile"
 )
 
 // DefaultPath is where the Host config lives.
@@ -40,6 +41,9 @@ type Config struct {
 	EnabledActions []protocol.Action
 	// PackageListRefresh is the daily package list refresh (v1 spec §4.6).
 	PackageListRefresh bool
+	// VPNAddress is Home Assistant's single VPN address, if the owner set
+	// one. It is in AllowedSources too.
+	VPNAddress netip.Addr
 }
 
 type file struct {
@@ -48,6 +52,7 @@ type file struct {
 	AllowedSources     *[]string         `json:"allowed_sources"`
 	EnabledActions     []protocol.Action `json:"enabled_actions"`
 	PackageListRefresh *bool             `json:"package_list_refresh"`
+	VPNAddress         *string           `json:"vpn_address"`
 }
 
 var actions = []protocol.Action{protocol.ActionReboot, protocol.ActionUpdateRun, protocol.ActionAgentUpdate}
@@ -59,17 +64,25 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	var f file
-	if err := json.Unmarshal(data, &f); err != nil {
+	c, err := parse(data)
+	if err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
+	return c, nil
+}
+
+func parse(data []byte) (Config, error) {
+	var f file
+	if err := json.Unmarshal(data, &f); err != nil {
+		return Config{}, err
+	}
 	if f.Format != fileFormat {
-		return Config{}, fmt.Errorf("%s: format must be %d", path, fileFormat)
+		return Config{}, fmt.Errorf("format must be %d", fileFormat)
 	}
 	c := Config{Port: DefaultPort, EnabledActions: []protocol.Action{}, PackageListRefresh: true}
 	if f.Port != nil {
 		if *f.Port < 1 || *f.Port > 65535 {
-			return Config{}, fmt.Errorf("%s: port %d is not a TCP port", path, *f.Port)
+			return Config{}, fmt.Errorf("port %d is not a TCP port", *f.Port)
 		}
 		c.Port = *f.Port
 	}
@@ -80,9 +93,18 @@ func Load(path string) (Config, error) {
 	for _, source := range sources {
 		prefix, err := parseSource(source)
 		if err != nil {
-			return Config{}, fmt.Errorf("%s: allowed_sources: %w", path, err)
+			return Config{}, fmt.Errorf("allowed_sources: %w", err)
 		}
 		c.AllowedSources = append(c.AllowedSources, prefix)
+	}
+	// Home Assistant's single VPN address, allowed beside the list.
+	if f.VPNAddress != nil {
+		addr, err := netip.ParseAddr(*f.VPNAddress)
+		if err != nil {
+			return Config{}, fmt.Errorf("vpn_address must be a single address: %w", err)
+		}
+		c.VPNAddress = addr
+		c.AllowedSources = append(c.AllowedSources, netip.PrefixFrom(addr, addr.BitLen()))
 	}
 	// An Action this release does not know stays off.
 	for _, action := range f.EnabledActions {
@@ -137,4 +159,76 @@ func (c Config) Allows(addr netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+// Default is the Host config an install writes: every Action off.
+const Default = "{\n  \"format\": 1\n}\n"
+
+// WriteDefault writes the default Host config at path, unless a config is
+// there already. It says whether it wrote one.
+func WriteDefault(path string) (bool, error) {
+	if _, err := os.Lstat(path); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	return true, write(path, []byte(Default))
+}
+
+// Setup is what `hostbeacon setup` sets in the Host config.
+type Setup struct {
+	// EnabledActions replaces the enabled Actions: an Action not named is off.
+	EnabledActions []protocol.Action
+	// VPNAddress is Home Assistant's single VPN address. Nil keeps the
+	// current one; empty removes it.
+	VPNAddress *string
+}
+
+// WriteSetup writes s into the Host config at path, or into a new default
+// config. It keeps every other field, also those of a later release, and
+// changes nothing when the result would not load.
+func WriteSetup(path string, s Setup) error {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		data, err = []byte(Default), nil
+	}
+	if err != nil {
+		return err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	for _, action := range s.EnabledActions {
+		if !slices.Contains(actions, action) {
+			return fmt.Errorf("unknown Action %q", action)
+		}
+	}
+	if fields["enabled_actions"], err = json.Marshal(append([]protocol.Action{}, s.EnabledActions...)); err != nil {
+		return err
+	}
+	switch {
+	case s.VPNAddress == nil:
+	case *s.VPNAddress == "":
+		delete(fields, "vpn_address")
+	default:
+		if fields["vpn_address"], err = json.Marshal(*s.VPNAddress); err != nil {
+			return err
+		}
+	}
+	data, err = json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if _, err := parse(data); err != nil {
+		return err
+	}
+	return write(path, data)
+}
+
+// write replaces the file at path in one step. Only root may change it.
+func write(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return statefile.Write(path, data, 0o644)
 }

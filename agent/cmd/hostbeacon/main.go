@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/iwaneo/hostbeacon/agent/internal/discovery"
 	"github.com/iwaneo/hostbeacon/agent/internal/helper"
 	"github.com/iwaneo/hostbeacon/agent/internal/identity"
+	"github.com/iwaneo/hostbeacon/agent/internal/install"
 	"github.com/iwaneo/hostbeacon/agent/internal/pairing"
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
 	"github.com/iwaneo/hostbeacon/agent/internal/server"
@@ -38,13 +40,21 @@ const (
 )
 
 const usage = `Usage:
-  hostbeacon serve    run the network part (systemd starts it)
+  hostbeacon setup    turn Actions on or off, allow Home Assistant's VPN address,
+                      open the firewall port, and pair (run as root). It asks
+                      each question. With flags it asks nothing, and an Action
+                      not named in --actions is off:
+                        --actions reboot,update_run,agent_update | none
+                        --vpn-address <address> | none   (unchanged if not given)
+                        --open-firewall                  (firewalld or ufw)
+                        --pair                           (show a Pairing code)
   hostbeacon pair     show a Pairing code for Home Assistant (run as root)
   hostbeacon pairings list
                       show each Home Assistant paired with this Host (run as root)
   hostbeacon pairings remove <ID or name>
                       remove a Pairing and close its connection (run as root)
-  hostbeacon status   show the Agent's identity and Pairings (run as root)
+  hostbeacon status   show whether the Agent runs, its Actions, identity, and
+                      Pairings (run as root)
   hostbeacon reset-identity [--yes]
                       give this Host a new identity, as for a copy; removes every
                       Pairing (run as root). Clone detection is best effort: run it
@@ -53,6 +63,9 @@ const usage = `Usage:
                       keep this Host's identity and end an identity hold (run as root)
   hostbeacon regenerate-key [--yes]
                       make a new key and certificate; removes every Pairing (run as root)
+  hostbeacon install  install the Agent from the unpacked tarball, into
+                      /usr/local/bin (run as root, from the tarball directory)
+  hostbeacon serve    run the network part (systemd starts it)
   hostbeacon version  show the version
 `
 
@@ -70,13 +83,15 @@ func main() {
 		err = pair(args)
 	case "pairings":
 		err = pairings(args, os.Stdout, time.Now(), time.Local)
-	case "status", "reset-identity", "keep-identity", "regenerate-key":
+	case "setup", "status", "install", "reset-identity", "keep-identity", "regenerate-key":
 		if os.Geteuid() != 0 {
 			err = errors.New("run it as root: sudo hostbeacon " + command)
 			break
 		}
 		run := map[string]func([]string, owner) error{
+			"setup":          setup,
 			"status":         status,
+			"install":        installTarball,
 			"reset-identity": resetIdentity,
 			"keep-identity":  keepIdentity,
 			"regenerate-key": regenerateKey,
@@ -94,16 +109,37 @@ func main() {
 	}
 }
 
+// installTarball installs the Agent from the directory this program is in.
+func installTarball(args []string, o owner) error {
+	if len(args) > 0 {
+		return fmt.Errorf("unexpected argument %q", args[0])
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if self, err = filepath.EvalSymlinks(self); err != nil {
+		return err
+	}
+	tarball := install.Tarball{Root: "/", Source: filepath.Dir(self), Run: o.run, Out: o.out}
+	return tarball.Install(context.Background())
+}
+
 func pair(args []string) error {
 	flags := flag.NewFlagSet("pair", flag.ExitOnError)
 	stateDir := flags.String("state-dir", defaultStateDir, "the Agent's state directory")
 	flags.Parse(args)
 
-	code, expires, err := pairing.NewCode(*stateDir, time.Now())
+	return printPairingCode(os.Stdout, *stateDir)
+}
+
+// printPairingCode makes a new Pairing code and shows it.
+func printPairingCode(out io.Writer, stateDir string) error {
+	code, expires, err := pairing.NewCode(stateDir, time.Now())
 	if err != nil {
 		return err
 	}
-	fmt.Printf(`Pairing code: %s
+	fmt.Fprintf(out, `Pairing code: %s
 
 In Home Assistant, add the Hostbeacon integration and enter this code.
 It works once, until %s (10 minutes), and stops after 5 wrong tries.

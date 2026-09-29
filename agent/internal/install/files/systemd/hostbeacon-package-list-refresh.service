@@ -8,7 +8,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/hostbeacon-helper refresh-package-list
+ExecStart=/usr/bin/hostbeacon-helper refresh-package-list
 # The stamp with the last refresh time; the network part reads it.
 StateDirectory=hostbeacon-helper
 StateDirectoryMode=0755
