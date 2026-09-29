@@ -69,7 +69,7 @@ func startAgent(t *testing.T, change func(*Server)) *agent {
 		Config:   config.Config{Port: 0, AllowedSources: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}},
 		Identity: id,
 		Pairings: pairing.Open(dir, time.Now),
-		State:    NewState(protocol.System{CPUPercent: ptr(5.0), MemoryPercent: ptr(40.0)}),
+		State:    NewState(protocol.Groups{System: &protocol.System{CPUPercent: ptr(5.0), MemoryPercent: ptr(40.0)}}),
 		Hello: protocol.HelloRequest{
 			InstanceID:     id.InstanceID,
 			RunID:          identity.NewUUID(),
@@ -295,12 +295,12 @@ func TestPairThenHelloSnapshotAndDeltaOnlyAfterChange(t *testing.T) {
 	}
 
 	// The same values again: no delta.
-	a.server.State.SetSystem(protocol.System{CPUPercent: ptr(5.0), MemoryPercent: ptr(40.0)})
+	a.server.State.Set(protocol.Groups{System: &protocol.System{CPUPercent: ptr(5.0), MemoryPercent: ptr(40.0)}})
 	if message, err := read(t, conn, 300*time.Millisecond); err == nil {
 		t.Fatalf("got %T without a change, want nothing", message)
 	}
 
-	a.server.State.SetSystem(protocol.System{CPUPercent: ptr(7.0), MemoryPercent: ptr(40.0)})
+	a.server.State.Set(protocol.Groups{System: &protocol.System{CPUPercent: ptr(7.0), MemoryPercent: ptr(40.0)}})
 	message, err := read(t, conn, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -319,7 +319,7 @@ func TestEachConnectionGetsTheCurrentSnapshot(t *testing.T) {
 	ha, _ := pair(t, a, a.newCode(t))
 	first, _, _ := ha.connect(t)
 	first.conn.CloseNow()
-	a.server.State.SetSystem(protocol.System{CPUPercent: ptr(9.0)})
+	a.server.State.Set(protocol.Groups{System: &protocol.System{CPUPercent: ptr(9.0)}})
 	_, _, snapshot := ha.connect(t)
 	if *snapshot.Groups.System.CPUPercent != 9 {
 		t.Errorf("snapshot CPU = %v, want 9", *snapshot.Groups.System.CPUPercent)
@@ -464,7 +464,7 @@ func TestLoggedInConnectionHasNoTimeout(t *testing.T) {
 	ha, _ := pair(t, a, a.newCode(t))
 	conn, _, _ := ha.connect(t)
 	time.Sleep(400 * time.Millisecond)
-	a.server.State.SetSystem(protocol.System{CPUPercent: ptr(1.0)})
+	a.server.State.Set(protocol.Groups{System: &protocol.System{CPUPercent: ptr(1.0)}})
 	if _, err := read(t, conn, 2*time.Second); err != nil {
 		t.Fatalf("logged-in connection closed: %v", err)
 	}
@@ -519,5 +519,38 @@ func TestLogsHoldNoKeyOrCode(t *testing.T) {
 		if strings.Contains(log, secret) {
 			t.Errorf("log holds a secret: %q", secret)
 		}
+	}
+}
+
+func TestSnapshotHasEveryGroupAndDeltaOnlyTheChangedOne(t *testing.T) {
+	a := startAgent(t, func(s *Server) {
+		s.State = NewState(protocol.Groups{
+			Agent:  &protocol.AgentInfo{Hostname: "test-host", AgentVersion: "0.0.0", Capabilities: []string{"disks"}, EnabledActions: []protocol.Action{}},
+			System: &protocol.System{CPUPercent: ptr(5.0)},
+			Disks:  &protocol.Disks{Mounts: []protocol.Mount{{Mount: "/", UsedPercent: ptr(50.0)}}},
+			Flags:  &protocol.Flags{RebootRequired: "no", LastBoot: ptr("2026-09-21T14:13:20Z")},
+		})
+	})
+	ha, _ := pair(t, a, a.newCode(t))
+	a.server.State.Set(protocol.Groups{Agent: &protocol.AgentInfo{Hostname: "renamed-host", AgentVersion: "0.0.0", Capabilities: []string{"disks"}, EnabledActions: []protocol.Action{}}})
+	conn, hello, snapshot := ha.connect(t)
+	if hello.Hostname != "renamed-host" || snapshot.Groups.Agent.Hostname != "renamed-host" {
+		t.Errorf("hello hostname = %q, want the current one", hello.Hostname)
+	}
+	if snapshot.Groups.Disks == nil || snapshot.Groups.Flags.RebootRequired != "no" || snapshot.Groups.UpdateRun == nil {
+		t.Errorf("snapshot = %+v", snapshot.Groups)
+	}
+
+	a.server.State.Set(protocol.Groups{
+		System: &protocol.System{CPUPercent: ptr(5.0)},
+		Flags:  &protocol.Flags{RebootRequired: "yes", LastBoot: ptr("2026-09-21T14:13:20Z")},
+	})
+	message, err := read(t, conn, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta := message.(*protocol.Delta)
+	if delta.Groups.Flags == nil || delta.Groups.Flags.RebootRequired != "yes" || delta.Groups.System != nil || delta.Groups.Disks != nil {
+		t.Errorf("delta = %+v, want only the flags group", delta.Groups)
 	}
 }

@@ -2,7 +2,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -27,7 +25,7 @@ import (
 
 const (
 	defaultStateDir = "/var/lib/hostbeacon"
-	systemInterval  = 30 * time.Second
+	defaultCacheDir = "/var/cache/hostbeacon"
 )
 
 const usage = `Usage:
@@ -82,6 +80,7 @@ func serve(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ExitOnError)
 	configPath := flags.String("config", config.DefaultPath, "the Host config file")
 	stateDir := flags.String("state-dir", defaultStateDir, "the Agent's state directory")
+	cacheDir := flags.String("cache-dir", defaultCacheDir, "a directory the package manager may use for its cache")
 	flags.Parse(args)
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
@@ -98,24 +97,32 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	sampler := system.NewSampler("/")
-	sampler.Sample() // the first CPU value needs an earlier reading
-	time.Sleep(time.Second)
-	state := server.NewState(sampler.Sample())
-	go func() {
-		ticker := time.NewTicker(systemInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				state.SetSystem(sampler.Sample())
-			}
-		}
-	}()
-
+	// The package manager may write its cache and log under HOME (dnf5 does).
+	// Without this directory, only reading Available updates on dnf fails.
+	if err := os.MkdirAll(*cacheDir, 0o700); err != nil {
+		log.Warn("cannot make the cache directory", "error", err)
+	}
+	run := system.Exec([]string{"LANG=C", "LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=" + *cacheDir})
+	var services system.ServiceSource
+	if systemd, err := system.ConnectSystemd(ctx); err != nil {
+		log.Warn("cannot read systemd over D-Bus, so failed services are not shown", "error", err)
+	} else {
+		defer systemd.Close()
+		services = systemd
+	}
+	host := system.Detect(ctx, "/", run, system.Statfs, services, time.Now)
 	hostname, _ := os.Hostname()
+	agent := protocol.AgentInfo{
+		Hostname:       hostname,
+		AgentVersion:   version.Version,
+		Capabilities:   host.Capabilities,
+		EnabledActions: []protocol.Action{},
+	}
+	collector := system.NewCollector(host, system.DefaultIntervals, agent)
+	time.Sleep(time.Second) // the first CPU value needs an earlier reading
+	state := server.NewState(collector.Sample(ctx))
+	collector.Run(ctx, state.Set)
+
 	s := &server.Server{
 		Config:   hostConfig,
 		Identity: id,
@@ -125,12 +132,18 @@ func serve(args []string) error {
 			InstanceID:     id.InstanceID,
 			RunID:          identity.NewUUID(),
 			CopiedFrom:     []string{},
-			Hostname:       hostname,
-			AgentVersion:   version.Version,
-			Capabilities:   []string{},
-			EnabledActions: []protocol.Action{},
-			Distro:         readDistro("/etc/os-release"),
-			Architecture:   runtime.GOARCH,
+			Hostname:       agent.Hostname,
+			AgentVersion:   agent.AgentVersion,
+			Capabilities:   agent.Capabilities,
+			EnabledActions: agent.EnabledActions,
+			Environment:    host.Environment,
+			Distro: protocol.Distro{
+				ID:      optional(host.Release["ID"]),
+				Name:    optional(host.Release["NAME"]),
+				Version: optional(host.Release["VERSION_ID"]),
+			},
+			Architecture: runtime.GOARCH,
+			Kernel:       host.Kernel,
 		},
 		Log: log,
 	}
@@ -142,19 +155,10 @@ func serve(args []string) error {
 	return s.Serve(ctx, listener)
 }
 
-// readDistro reads ID, NAME, and VERSION_ID from os-release. A missing value
-// is null.
-func readDistro(path string) protocol.Distro {
-	values := map[string]*string{}
-	if file, err := os.Open(path); err == nil {
-		defer file.Close()
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			if name, value, ok := strings.Cut(scanner.Text(), "="); ok {
-				value = strings.Trim(value, `"'`)
-				values[name] = &value
-			}
-		}
+// optional is null for empty text.
+func optional(text string) *string {
+	if text == "" {
+		return nil
 	}
-	return protocol.Distro{ID: values["ID"], Name: values["NAME"], Version: values["VERSION_ID"]}
+	return &text
 }

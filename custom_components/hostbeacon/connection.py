@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import logging
 import random
 import uuid
 from collections.abc import Callable
+from datetime import datetime
 
 import aiohttp
+from homeassistant.util import dt as dt_util
 
 from . import protocol
 from .pairing import agent_url
@@ -44,7 +47,18 @@ class HostConnection:
         self._listeners: list[Callable[[], None]] = []
         self._problem: str | None = None
         self.online = False
-        self.system: protocol.System | None = None
+        # The latest hello and state groups. They stay while Offline.
+        self.hello: protocol.HelloRequest | None = None
+        self.groups = protocol.Groups()
+        # When the Agent last sent a message, or was last connected.
+        self.last_seen: datetime | None = None
+
+    @property
+    def capabilities(self) -> list[str]:
+        """The data sources that work on the Host, from the latest agent group."""
+        if self.groups.agent is not None:
+            return self.groups.agent.capabilities
+        return self.hello.capabilities if self.hello else []
 
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
         """Call listener on every change. Returns a function that removes it."""
@@ -84,6 +98,7 @@ class HostConnection:
 
     def _set_offline(self) -> None:
         self.online = False
+        self.last_seen = dt_util.utcnow()
         self._changed()
 
     async def _session_once(self) -> None:
@@ -103,6 +118,7 @@ class HostConnection:
                 except protocol.ProtocolError as err:
                     _LOGGER.warning("Ignored a malformed message from %s: %s", self._name, err)
                     continue
+                self.last_seen = dt_util.utcnow()
                 reply = self._handle(message)
                 if reply is not None:
                     await ws.send_str(protocol.encode(reply))
@@ -113,6 +129,7 @@ class HostConnection:
         """Update the state from one message, and return the reply if any."""
         match message:
             case protocol.HelloRequest():
+                self.hello = message
                 return protocol.HelloReply(
                     id=str(uuid.uuid4()),
                     reply_to=message.id,
@@ -121,16 +138,21 @@ class HostConnection:
                     protocol_majors=protocol.PROTOCOL_MAJORS,
                 )
             case protocol.Snapshot():
-                self.system = message.groups.system
+                self.groups = message.groups
                 self.online = True
                 if self._problem is not None:
                     _LOGGER.info("%s is connected again", self._name)
                 self._problem = None
                 self._changed()
             case protocol.Delta():
-                if message.groups.system is not None:
-                    self.system = message.groups.system
-                    self._changed()
+                # Each group in a delta is complete and replaces the old one.
+                changed = {
+                    item.name: getattr(message.groups, item.name)
+                    for item in dataclasses.fields(message.groups)
+                    if getattr(message.groups, item.name) is not None
+                }
+                self.groups = dataclasses.replace(self.groups, **changed)
+                self._changed()
             case protocol.Unknown():
                 return protocol.unsupported_reply(message, str(uuid.uuid4()))
         return None

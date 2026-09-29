@@ -52,6 +52,74 @@
       },
       "swap_usage": {
         "name": "Swap usage"
+      },
+      "load_1": {
+        "name": "Load (1 min)"
+      },
+      "load_5": {
+        "name": "Load (5 min)"
+      },
+      "load_15": {
+        "name": "Load (15 min)"
+      },
+      "cpu_temperature": {
+        "name": "CPU temperature"
+      },
+      "last_boot": {
+        "name": "Last boot"
+      },
+      "disk_used": {
+        "name": "Disk {mount} used"
+      },
+      "disk_free": {
+        "name": "Disk {mount} free"
+      },
+      "download": {
+        "name": "{interface} download"
+      },
+      "upload": {
+        "name": "{interface} upload"
+      },
+      "downloaded": {
+        "name": "{interface} downloaded"
+      },
+      "uploaded": {
+        "name": "{interface} uploaded"
+      },
+      "failed_services": {
+        "name": "Failed services",
+        "state_attributes": {
+          "services": {
+            "name": "Services"
+          }
+        }
+      },
+      "reboot_required": {
+        "name": "Reboot required",
+        "state": {
+          "yes": "Yes",
+          "no": "No"
+        }
+      },
+      "available_updates": {
+        "name": "Available updates"
+      },
+      "environment": {
+        "name": "Environment",
+        "state": {
+          "bare_metal": "Bare metal",
+          "vm": "Virtual machine",
+          "lxc": "LXC container"
+        }
+      },
+      "kernel": {
+        "name": "Kernel"
+      },
+      "protocol_version": {
+        "name": "Protocol version"
+      },
+      "last_seen": {
+        "name": "Last seen"
       }
     }
   }
