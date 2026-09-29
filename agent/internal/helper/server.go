@@ -40,7 +40,10 @@ type Server struct {
 	// fails, the request is refused.
 	LoadConfig func() (config.Config, error)
 	Jobs       Jobs
-	Log        *slog.Logger
+	// Actions checks, logs, and runs Actions. Without it, every Action
+	// request is an error.
+	Actions *ActionRunner
+	Log     *slog.Logger
 }
 
 // Serve answers connections until ctx ends.
@@ -104,7 +107,8 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 	// Fail closed: without a readable Host config, no job runs.
-	if _, err := s.LoadConfig(); err != nil {
+	cfg, err := s.LoadConfig()
+	if err != nil {
 		s.Log.Error("refused a request: cannot read the Host config", "job", req.Job, "error", err)
 		writeReply(conn, reply{Error: fmt.Sprintf("refused: cannot read the Host config: %v", err)})
 		return
@@ -118,6 +122,8 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		s.answer(ctx, conn, func(ctx context.Context) (any, error) { return s.Jobs.ReadSMBIOSUUID(ctx) })
 	case JobWatchContainers:
 		s.watch(ctx, conn)
+	case JobAction:
+		s.act(ctx, conn, cfg, req.Action)
 	default:
 		s.Log.Warn("refused an unknown job", "job", req.Job)
 		writeReply(conn, reply{Error: fmt.Sprintf("unknown job %q", req.Job)})
@@ -137,6 +143,30 @@ func (s *Server) answer(ctx context.Context, conn net.Conn, job func(context.Con
 		writeReply(conn, reply{Error: err.Error()})
 		return
 	}
+	writeReply(conn, reply{Result: data})
+}
+
+// act answers an Action request with the Ack, and for an accepted Action,
+// runs it and answers its result.
+func (s *Server) act(ctx context.Context, conn net.Conn, cfg config.Config, request *ActionRequest) {
+	if s.Actions == nil || request == nil {
+		writeReply(conn, reply{Error: "no Action in the request"})
+		return
+	}
+	ack, run, err := s.Actions.Request(cfg, *request)
+	if err != nil {
+		writeReply(conn, reply{Error: err.Error()})
+		return
+	}
+	data, _ := json.Marshal(ack)
+	// The Action runs even when the caller has left.
+	writeReply(conn, reply{Result: data})
+	if run == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, jobTimeout)
+	defer cancel()
+	data, _ = json.Marshal(run(ctx))
 	writeReply(conn, reply{Result: data})
 }
 

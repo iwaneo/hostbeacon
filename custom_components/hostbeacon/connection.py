@@ -17,7 +17,7 @@ import random
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import aiohttp
 from homeassistant.util import dt as dt_util
@@ -32,6 +32,22 @@ BACKOFF_MAX = 60.0
 HEARTBEAT = 30
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 INTEGRATION_VERSION = "0.0.0"
+# How long to wait for the Agent's action_ack.
+ACK_TIMEOUT = 30
+# A Host that is not back this long after an accepted Reboot is Offline.
+REBOOT_TIMEOUT = timedelta(minutes=15)
+
+
+class ActionError(Exception):
+    """The Action request could not be sent, or the Agent did not answer it."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Reboot:
+    """An accepted Reboot: when it started, and the boot time before it."""
+
+    started_at: datetime
+    last_boot: str | None
 
 
 def _hello_reply(hello: protocol.HelloRequest) -> protocol.HelloReply:
@@ -122,6 +138,11 @@ class HostConnection:
         self.groups = protocol.Groups()
         # When the Agent last sent a message, or was last connected.
         self.last_seen: datetime | None = None
+        # Set after an accepted Reboot until the Agent is back with a new boot time.
+        self.reboot: Reboot | None = None
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        # The pending Action requests by message ID: the Action and its answer.
+        self._acks: dict[str, tuple[str, asyncio.Future[protocol.ActionAck]]] = {}
 
     @property
     def capabilities(self) -> list[str]:
@@ -129,6 +150,53 @@ class HostConnection:
         if self.groups.agent is not None:
             return self.groups.agent.capabilities
         return self.hello.capabilities if self.hello else []
+
+    @property
+    def enabled_actions(self) -> list[str]:
+        """The Actions the owner enabled on the Host, from the latest agent group."""
+        if self.groups.agent is not None:
+            return self.groups.agent.enabled_actions
+        return self.hello.enabled_actions if self.hello else []
+
+    @property
+    def host_status(self) -> str:
+        """Online, Rebooting, or Offline (v1 spec §9). A timer ends Rebooting after 15 minutes."""
+        if self.reboot is not None:
+            return "rebooting"
+        return "online" if self.online else "offline"
+
+    def _start_reboot(self) -> None:
+        """Mark the Host Rebooting after the Agent accepted a Reboot."""
+        flags = self.groups.flags
+        self.reboot = Reboot(dt_util.utcnow(), flags.last_boot if flags else None)
+        self._changed()
+
+    def end_reboot(self) -> None:
+        """End Rebooting: the Host is back, the Reboot failed, or it took too long."""
+        if self.reboot is not None:
+            self.reboot = None
+            self._changed()
+
+    async def request_action(self, action: str, user: str | None) -> protocol.ActionAck:
+        """Send an Action request and return the Agent's answer.
+
+        Each request has a new Action ID. It is never sent again, so Home
+        Assistant never repeats an Action ID older than 1 hour.
+        """
+        ws = self._ws
+        if ws is None or not self.online:
+            raise ActionError
+        request = protocol.ActionRequest(id=str(uuid.uuid4()), action_id=str(uuid.uuid4()), action=action, user=user)
+        answer = asyncio.get_running_loop().create_future()
+        self._acks[request.id] = (action, answer)
+        try:
+            await ws.send_str(protocol.encode(request))
+            async with asyncio.timeout(ACK_TIMEOUT):
+                return await answer
+        except (aiohttp.ClientError, ConnectionError, TimeoutError) as err:
+            raise ActionError from err
+        finally:
+            del self._acks[request.id]
 
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
         """Call listener on every change. Returns a function that removes it."""
@@ -173,18 +241,25 @@ class HostConnection:
 
     async def _session_once(self) -> None:
         async with _connect(self._session, *self._address, self._fingerprint, self._key, HEARTBEAT) as ws:
-            async for frame in ws:
-                if frame.type != aiohttp.WSMsgType.TEXT:
-                    break
-                try:
-                    message = protocol.decode(frame.data)
-                except protocol.ProtocolError as err:
-                    _LOGGER.warning("Ignored a malformed message from %s: %s", self._name, err)
-                    continue
-                self.last_seen = dt_util.utcnow()
-                reply = self._handle(message)
-                if reply is not None:
-                    await ws.send_str(protocol.encode(reply))
+            self._ws = ws
+            try:
+                async for frame in ws:
+                    if frame.type != aiohttp.WSMsgType.TEXT:
+                        break
+                    try:
+                        message = protocol.decode(frame.data)
+                    except protocol.ProtocolError as err:
+                        _LOGGER.warning("Ignored a malformed message from %s: %s", self._name, err)
+                        continue
+                    self.last_seen = dt_util.utcnow()
+                    reply = self._handle(message)
+                    if reply is not None:
+                        await ws.send_str(protocol.encode(reply))
+            finally:
+                self._ws = None
+                for _, answer in self._acks.values():
+                    if not answer.done():
+                        answer.set_exception(ActionError())
         if self.online:
             _LOGGER.info("%s disconnected", self._name)
 
@@ -200,6 +275,7 @@ class HostConnection:
                 if self._problem is not None:
                     _LOGGER.info("%s is connected again", self._name)
                 self._problem = None
+                self._check_rebooted()
                 self._changed()
             case protocol.Delta():
                 # Each group in a delta is complete and replaces the old one.
@@ -209,7 +285,26 @@ class HostConnection:
                     if getattr(message.groups, item.name) is not None
                 }
                 self.groups = dataclasses.replace(self.groups, **changed)
+                self._check_rebooted()
                 self._changed()
+            case protocol.ActionAck():
+                action, answer = self._acks.get(message.reply_to, (None, None))
+                if answer is None or answer.done():
+                    return None
+                # Marked here, not by the caller: a failed result may come
+                # right after the ack, before the caller runs again.
+                if action == "reboot" and message.status == "accepted":
+                    self._start_reboot()
+                answer.set_result(message)
+            case protocol.ActionResult(action="reboot", result="failed"):
+                _LOGGER.error("Reboot of %s failed: %s", self._name, message.error)
+                self.end_reboot()
             case protocol.Unknown():
                 return protocol.unsupported_reply(message, str(uuid.uuid4()))
         return None
+
+    def _check_rebooted(self) -> None:
+        """End Rebooting when the Agent reports a new boot time."""
+        flags = self.groups.flags
+        if self.reboot is not None and flags is not None and flags.last_boot not in (None, self.reboot.last_boot):
+            self.reboot = None

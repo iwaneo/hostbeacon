@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
+from datetime import datetime
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
@@ -11,15 +13,19 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_point_in_utc_time
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
 
-from .connection import HostConnection, remove_pairing
+from .connection import REBOOT_TIMEOUT, HostConnection, Reboot, remove_pairing
 from .const import CONF_FINGERPRINT, CONF_KEY, DOMAIN
 from .pairing import pairing_id
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR]
+STORAGE_VERSION = 1
 
 type HostbeaconConfigEntry = ConfigEntry[HostConnection]
 
@@ -66,9 +72,54 @@ async def async_setup_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -
         )
 
     entry.async_on_unload(connection.add_listener(update_device))
+    await _track_reboot(hass, entry, connection)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, connection.run(), f"hostbeacon connection {entry.title}")
     return True
+
+
+def _store(hass: HomeAssistant, entry: ConfigEntry) -> Store[dict]:
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
+
+
+async def _track_reboot(hass: HomeAssistant, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
+    """Save the Rebooting start, so it survives a restart, and end it after 15 minutes."""
+    store = _store(hass, entry)
+    saved = (await store.async_load() or {}).get("reboot")
+    stored = None
+    if saved and (started_at := dt_util.parse_datetime(saved["started_at"])):
+        stored = Reboot(started_at, saved["last_boot"])
+        # Home Assistant may have been stopped for longer than the Reboot may take.
+        if dt_util.utcnow() < started_at + REBOOT_TIMEOUT:
+            connection.reboot = stored
+    cancel_timer: Callable[[], None] | None = None
+
+    @callback
+    def reboot_timed_out(_: datetime) -> None:
+        connection.end_reboot()
+
+    @callback
+    def reboot_changed() -> None:
+        nonlocal stored, cancel_timer
+        reboot = connection.reboot
+        if cancel_timer is not None and reboot != stored:
+            cancel_timer()
+            cancel_timer = None
+        if reboot is not None and cancel_timer is None:
+            cancel_timer = async_track_point_in_utc_time(hass, reboot_timed_out, reboot.started_at + REBOOT_TIMEOUT)
+        if reboot != stored:
+            stored = reboot
+            data = {"started_at": reboot.started_at.isoformat(), "last_boot": reboot.last_boot} if reboot else None
+            store.async_delay_save(lambda: {"reboot": data}, 0)
+
+    @callback
+    def stop_timer() -> None:
+        if cancel_timer is not None:
+            cancel_timer()
+
+    reboot_changed()
+    entry.async_on_unload(connection.add_listener(reboot_changed))
+    entry.async_on_unload(stop_timer)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -> bool:
@@ -82,6 +133,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) 
     If the Host cannot be reached, its Pairing stays, so tell the user the
     command to run on the Host.
     """
+    await _store(hass, entry).async_remove()
     key = base64.b64decode(entry.data[CONF_KEY])
     if await remove_pairing(
         async_get_clientsession(hass),

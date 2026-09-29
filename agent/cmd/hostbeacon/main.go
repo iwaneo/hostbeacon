@@ -207,10 +207,12 @@ func serve(args []string) error {
 	host := system.Detect(ctx, "/", run, system.Statfs, services, helper.Client{Socket: *helperSocket}, time.Now)
 	hostname, _ := os.Hostname()
 	agent := protocol.AgentInfo{
-		Hostname:       hostname,
-		AgentVersion:   version.Version,
-		Capabilities:   host.Capabilities,
-		EnabledActions: []protocol.Action{},
+		Hostname:     hostname,
+		AgentVersion: version.Version,
+		Capabilities: host.Capabilities,
+		// Home Assistant shows a control only for an enabled Action. The root
+		// helper re-reads the Host config for every request.
+		EnabledActions: hostConfig.EnabledActions,
 	}
 	collector := system.NewCollector(host, system.DefaultIntervals, agent)
 	time.Sleep(time.Second) // the first CPU value needs an earlier reading
@@ -241,7 +243,8 @@ func serve(args []string) error {
 			Architecture: runtime.GOARCH,
 			Kernel:       host.Kernel,
 		},
-		Log: log,
+		Actions: helper.Client{Socket: *helperSocket},
+		Log:     log,
 	}
 	listener, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(hostConfig.Port)))
 	if err != nil {

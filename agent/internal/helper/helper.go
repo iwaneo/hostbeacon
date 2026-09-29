@@ -14,12 +14,14 @@ import "encoding/json"
 // DefaultSocket is where the helper listens.
 const DefaultSocket = "/run/hostbeacon-helper/helper.sock"
 
-// The fixed job list. Actions come in later tickets.
+// The fixed job list. The action job runs an Action: the helper answers the
+// Ack, and when it is accepted, the result on a second line.
 const (
 	JobReadSmart       = "read_smart"
 	JobReadContainers  = "read_containers"
 	JobWatchContainers = "watch_containers"
 	JobReadSMBIOSUUID  = "read_smbios_uuid"
+	JobAction          = "action"
 )
 
 // SmartDisk is what SMART says about one physical disk.
@@ -55,7 +57,8 @@ type Containers struct {
 }
 
 type request struct {
-	Job string `json:"job"`
+	Job    string         `json:"job"`
+	Action *ActionRequest `json:"action,omitempty"`
 }
 
 type reply struct {

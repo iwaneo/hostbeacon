@@ -55,6 +55,11 @@
         "name": "Disk {device} health"
       }
     },
+    "button": {
+      "reboot": {
+        "name": "Reboot"
+      }
+    },
     "sensor": {
       "host_status": {
         "name": "Host status",
@@ -180,6 +185,39 @@
     },
     "pairing_not_removed": {
       "message": "Home Assistant could not reach {host} to remove its Pairing, so the Host still accepts this Home Assistant's key. On the Host, run:\n\n`sudo hostbeacon pairings remove {pairing_id}`"
+    },
+    "reboot_not_admin": {
+      "message": "Only Home Assistant admins can reboot {host}."
+    },
+    "reboot_disabled": {
+      "message": "Reboot is turned off on {host}. The Host owner can turn it on in the Agent config."
+    },
+    "reboot_too_soon_after_boot": {
+      "message": "{host} started less than 10 minutes ago. Reboot is possible after {time}."
+    },
+    "action_busy": {
+      "message": "{host} is busy with a package task. Try again later."
+    },
+    "action_update_run_running": {
+      "message": "An Update run is already running on {host}."
+    },
+    "action_cannot_log": {
+      "message": "{host} refused: the Agent cannot write its Action log."
+    },
+    "action_duplicate": {
+      "message": "This {action} was already sent to {host}. Waiting for its result."
+    },
+    "action_duplicate_ok": {
+      "message": "This {action} was already sent to {host}. Its result: OK."
+    },
+    "action_duplicate_failed": {
+      "message": "This {action} was already sent to {host}. Its result: failed ({error})."
+    },
+    "action_refused": {
+      "message": "{host} refused the {action}: {reason}."
+    },
+    "action_no_answer": {
+      "message": "{host} did not answer the {action} request. Check that it is Online and try again."
     }
   }
 }

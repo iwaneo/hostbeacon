@@ -41,13 +41,13 @@ def system(
     )
 
 
-def flags(reboot_required: str = "no") -> protocol.Flags:
+def flags(reboot_required: str = "no", last_boot: str | None = "2026-09-21T14:13:20Z") -> protocol.Flags:
     return protocol.Flags(
         reboot_required=reboot_required,
         package_task_running=False,
         package_system_broken=False,
         package_system_fix_command=None,
-        last_boot="2026-09-21T14:13:20Z",
+        last_boot=last_boot,
     )
 
 
@@ -60,6 +60,14 @@ class FakeAgent:
         self.hostname = "test-host"
         self.system = system()
         self.capabilities: list[str] = []
+        self.enabled_actions: list[str] = []
+        # Every Action request, and how the Agent answers the next ones: accepted
+        # when refusal is None, else refused with that reason and first result.
+        self.action_requests: list[protocol.ActionRequest] = []
+        self.refusal: tuple[str, protocol.ActionOutcome | None] | None = None
+        self.answer_actions = True
+        # A result sent right after the ack of an accepted Action.
+        self.result_at_once: protocol.ActionOutcome | None = None
         self.environment: str | None = "vm"
         self.kernel: str | None = "6.12.48+deb13-amd64"
         # The groups other than agent, system, and update_run.
@@ -147,7 +155,7 @@ class FakeAgent:
             agent_version="0.1.0",
             newest_agent_version=None,
             capabilities=self.capabilities,
-            enabled_actions=[],
+            enabled_actions=self.enabled_actions,
         )
 
     def _record(self, request: web.Request) -> None:
@@ -198,7 +206,7 @@ class FakeAgent:
                 agent_version="0.1.0",
                 newest_agent_version=None,
                 capabilities=self.capabilities,
-                enabled_actions=[],
+                enabled_actions=self.enabled_actions,
                 environment=self.environment,
                 distro=protocol.Distro(id="debian", name="Debian GNU/Linux", version="13"),
                 architecture="amd64",
@@ -210,16 +218,44 @@ class FakeAgent:
                 return socket
             await socket.send_str(protocol.encode(self._snapshot()))
             async for frame in socket:
-                if frame.type == WSMsgType.TEXT and isinstance(
-                    request := protocol.decode(frame.data), protocol.PairingRemoveRequest
-                ):
+                if frame.type != WSMsgType.TEXT:
+                    continue
+                request = protocol.decode(frame.data)
+                if isinstance(request, protocol.PairingRemoveRequest):
                     self.keys.discard(key)
                     reply = protocol.PairingRemoveReply(id=str(uuid.uuid4()), reply_to=request.id)
                     await socket.send_str(protocol.encode(reply))
                     await socket.close()
+                elif isinstance(request, protocol.ActionRequest):
+                    self.action_requests.append(request)
+                    if self.answer_actions:
+                        ack, outcome = self._ack(request), self.result_at_once
+                        await socket.send_str(protocol.encode(ack))
+                        if outcome is not None and ack.status == "accepted":
+                            await self.send_action_result(outcome.result, outcome.error)
         finally:
             self._sockets.discard(socket)
         return socket
+
+    def _ack(self, request: protocol.ActionRequest) -> protocol.ActionAck:
+        reason, first_result = self.refusal or (None, None)
+        return protocol.ActionAck(
+            id=str(uuid.uuid4()),
+            reply_to=request.id,
+            action_id=request.action_id,
+            status="refused" if reason else "accepted",
+            reason=reason,
+            first_result=first_result,
+        )
+
+    async def send_action_result(self, result: str, error: str | None = None) -> None:
+        """Send the result of the last Action request to every connection."""
+        request = self.action_requests[-1]
+        message = protocol.ActionResult(
+            id=str(uuid.uuid4()), action_id=request.action_id, action=request.action, result=result, error=error
+        )
+        for socket in list(self._sockets):
+            await socket.send_str(protocol.encode(message))
 
     def _snapshot(self) -> protocol.Snapshot:
         return protocol.Snapshot(

@@ -29,8 +29,6 @@ import (
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 // logBuffer collects the Agent's log for checks.
 type logBuffer struct {
 	mu  sync.Mutex
