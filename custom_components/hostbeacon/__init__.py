@@ -6,8 +6,9 @@ import base64
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
@@ -36,6 +37,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -
         base64.b64decode(entry.data[CONF_KEY]),
     )
     entry.runtime_data = connection
+    device_registry = dr.async_get(hass)
+    identifiers = {(DOMAIN, entry.unique_id)}
+    if device_registry.async_get_device_by_identifier((DOMAIN, entry.unique_id), entry.entry_id) is None:
+        # The first name is the hostname at Pairing.
+        device_registry.async_get_or_create(config_entry_id=entry.entry_id, identifiers=identifiers, name=entry.title)
+
+    @callback
+    def update_device() -> None:
+        """Follow the Host's hostname, distro, Agent version, and architecture.
+
+        A name the user gave the device is kept: it is stored apart from this one.
+        """
+        hello, agent = connection.hello, connection.groups.agent
+        if hello is None:
+            return
+        distro = " ".join(part for part in (hello.distro.name, hello.distro.version) if part)
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers=identifiers,
+            name=agent.hostname if agent else hello.hostname,
+            model=distro or None,
+            sw_version=agent.agent_version if agent else hello.agent_version,
+            hw_version=hello.architecture,
+        )
+
+    entry.async_on_unload(connection.add_listener(update_device))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, connection.run(), f"hostbeacon connection {entry.title}")
     return True

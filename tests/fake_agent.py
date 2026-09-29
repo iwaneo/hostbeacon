@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import datetime
 import hashlib
 import hmac
@@ -23,15 +24,30 @@ from custom_components.hostbeacon import protocol
 from custom_components.hostbeacon.pairing import ALPHABET, agent_proof, code_key, home_assistant_proof
 
 
-def system(cpu: float | None = 12.0, memory: float | None = 34.0, swap: float | None = 5.0) -> protocol.System:
+def system(
+    cpu: float | None = 12.0,
+    memory: float | None = 34.0,
+    swap: float | None = 5.0,
+    load: tuple[float | None, float | None, float | None] = (None, None, None),
+) -> protocol.System:
     return protocol.System(
         cpu_percent=cpu,
         memory_percent=memory,
         memory_used_bytes=1_230_000_000,
         swap_percent=swap,
-        load_1=None,
-        load_5=None,
-        load_15=None,
+        load_1=load[0],
+        load_5=load[1],
+        load_15=load[2],
+    )
+
+
+def flags(reboot_required: str = "no") -> protocol.Flags:
+    return protocol.Flags(
+        reboot_required=reboot_required,
+        package_task_running=False,
+        package_system_broken=False,
+        package_system_fix_command=None,
+        last_boot="2026-09-21T14:13:20Z",
     )
 
 
@@ -43,6 +59,11 @@ class FakeAgent:
         self.instance_id = str(uuid.uuid4())
         self.hostname = "test-host"
         self.system = system()
+        self.capabilities: list[str] = []
+        self.environment: str | None = "vm"
+        self.kernel: str | None = "6.12.48+deb13-amd64"
+        # The groups other than agent, system, and update_run.
+        self.groups = protocol.Groups(flags=flags())
         self.code: str | None = None
         self.keys: set[bytes] = set()
         # Every request the Agent got, as "METHOD path?query" plus its headers.
@@ -106,9 +127,22 @@ class FakeAgent:
     async def send_system(self, value: protocol.System) -> None:
         """Change the system group and send a delta to every connection."""
         self.system = value
-        frame = protocol.encode(protocol.Delta(id=str(uuid.uuid4()), groups=protocol.Groups(system=value)))
+        await self.send_groups(protocol.Groups(system=value))
+
+    async def send_groups(self, groups: protocol.Groups) -> None:
+        """Send a delta with these groups to every connection."""
+        frame = protocol.encode(protocol.Delta(id=str(uuid.uuid4()), groups=groups))
         for socket in list(self._sockets):
             await socket.send_str(frame)
+
+    def _agent_info(self) -> protocol.AgentInfo:
+        return protocol.AgentInfo(
+            hostname=self.hostname,
+            agent_version="0.1.0",
+            newest_agent_version=None,
+            capabilities=self.capabilities,
+            enabled_actions=[],
+        )
 
     def _record(self, request: web.Request) -> None:
         self.requests.append((f"{request.method} {request.path_qs}", dict(request.headers)))
@@ -155,14 +189,14 @@ class FakeAgent:
                 run_id=str(uuid.uuid4()),
                 copied_from=[],
                 hostname=self.hostname,
-                agent_version="0.0.0",
+                agent_version="0.1.0",
                 newest_agent_version=None,
-                capabilities=[],
+                capabilities=self.capabilities,
                 enabled_actions=[],
-                environment=None,
+                environment=self.environment,
                 distro=protocol.Distro(id="debian", name="Debian GNU/Linux", version="13"),
                 architecture="amd64",
-                kernel=None,
+                kernel=self.kernel,
             )
             await socket.send_str(protocol.encode(hello))
             reply = await asyncio.wait_for(socket.receive(), 5)
@@ -178,14 +212,9 @@ class FakeAgent:
     def _snapshot(self) -> protocol.Snapshot:
         return protocol.Snapshot(
             id=str(uuid.uuid4()),
-            groups=protocol.Groups(
-                agent=protocol.AgentInfo(
-                    hostname=self.hostname,
-                    agent_version="0.0.0",
-                    newest_agent_version=None,
-                    capabilities=[],
-                    enabled_actions=[],
-                ),
+            groups=dataclasses.replace(
+                self.groups,
+                agent=self._agent_info(),
                 system=self.system,
                 update_run=protocol.UpdateRun(
                     run_id=None,
@@ -198,13 +227,6 @@ class FakeAgent:
                     remaining=None,
                     error=None,
                     needs_manual_update=protocol.NameList(count=None, names=[]),
-                ),
-                flags=protocol.Flags(
-                    reboot_required="unknown",
-                    package_task_running=False,
-                    package_system_broken=False,
-                    package_system_fix_command=None,
-                    last_boot=None,
                 ),
             ),
         )

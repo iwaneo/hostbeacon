@@ -169,7 +169,15 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("paired with Home Assistant; waiting for its first login", "pairing", request.Name, "source", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pairResponse{InstanceID: s.Identity.InstanceID, Hostname: s.Hello.Hostname, Key: key, Proof: proof})
+	json.NewEncoder(w).Encode(pairResponse{InstanceID: s.Identity.InstanceID, Hostname: s.hostname(), Key: key, Proof: proof})
+}
+
+// hostname is the current hostname from the agent group.
+func (s *Server) hostname() string {
+	if groups, _ := s.State.Groups(); groups.Agent != nil {
+		return groups.Agent.Hostname
+	}
+	return s.Hello.Hostname
 }
 
 // validName accepts a Pairing name of printable text, up to 64 characters.
@@ -217,6 +225,7 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn) error {
 	defer cancel()
 
 	hello := s.Hello
+	hello.Hostname = s.hostname()
 	hello.ID = identity.NewUUID()
 	hello.ProtocolVersion = protocol.Version
 	hello.ProtocolMajors = protocol.Majors
@@ -241,21 +250,9 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn) error {
 		return errors.New("no hello reply")
 	}
 
-	system, changed := s.State.System()
-	snapshot := &protocol.Snapshot{ID: identity.NewUUID(), Groups: protocol.Groups{
-		Agent: &protocol.AgentInfo{
-			Hostname:           hello.Hostname,
-			AgentVersion:       hello.AgentVersion,
-			NewestAgentVersion: hello.NewestAgentVersion,
-			Capabilities:       hello.Capabilities,
-			EnabledActions:     hello.EnabledActions,
-		},
-		System: &system,
-		// The Update run and the flags are not read yet.
-		UpdateRun: &protocol.UpdateRun{State: "idle", NeedsManualUpdate: protocol.NameList{Names: []string{}}},
-		Flags:     &protocol.Flags{RebootRequired: "unknown"},
-	}}
-	if err := send(ctx, ws, snapshot); err != nil {
+	groups, changed := s.State.Groups()
+	sent := s.snapshotGroups(hello, groups)
+	if err := send(ctx, ws, &protocol.Snapshot{ID: identity.NewUUID(), Groups: sent}); err != nil {
 		return err
 	}
 	for {
@@ -263,12 +260,42 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn) error {
 		case err := <-readDone:
 			return err
 		case <-changed:
-			system, changed = s.State.System()
-			if err := send(ctx, ws, &protocol.Delta{ID: identity.NewUUID(), Groups: protocol.Groups{System: &system}}); err != nil {
+			groups, changed = s.State.Groups()
+			delta, ok := changedGroups(sent, groups)
+			if !ok {
+				continue
+			}
+			if err := send(ctx, ws, &protocol.Delta{ID: identity.NewUUID(), Groups: delta}); err != nil {
 				return err
 			}
+			merge(&sent, delta)
 		}
 	}
+}
+
+// snapshotGroups fills in the groups a snapshot needs that the state does
+// not hold yet.
+func (s *Server) snapshotGroups(hello protocol.HelloRequest, groups protocol.Groups) protocol.Groups {
+	if groups.Agent == nil {
+		groups.Agent = &protocol.AgentInfo{
+			Hostname:           hello.Hostname,
+			AgentVersion:       hello.AgentVersion,
+			NewestAgentVersion: hello.NewestAgentVersion,
+			Capabilities:       hello.Capabilities,
+			EnabledActions:     hello.EnabledActions,
+		}
+	}
+	if groups.System == nil {
+		groups.System = &protocol.System{}
+	}
+	if groups.UpdateRun == nil {
+		// The Update run is not read yet.
+		groups.UpdateRun = &protocol.UpdateRun{State: "idle", NeedsManualUpdate: protocol.NameList{Names: []string{}}}
+	}
+	if groups.Flags == nil {
+		groups.Flags = &protocol.Flags{RebootRequired: "unknown"}
+	}
+	return groups
 }
 
 // read handles the messages Home Assistant sends until the connection ends.

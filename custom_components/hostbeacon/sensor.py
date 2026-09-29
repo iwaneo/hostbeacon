@@ -1,9 +1,11 @@
-"""Sensors for a Host: Host status, CPU usage, Memory usage, Swap usage."""
+"""Sensors for a Host. Each one appears only when the Host reports its capability."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -11,66 +13,268 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE
-from homeassistant.core import HomeAssistant
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfDataRate,
+    UnitOfInformation,
+    UnitOfTemperature,
+)
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
 
 from . import HostbeaconConfigEntry
 from .connection import HostConnection
 from .const import DOMAIN
-from .protocol import System
+from .protocol import Interface, Mount
 
 HOST_STATUS_OPTIONS = ["online", "updating", "rebooting", "offline"]
+REBOOT_REQUIRED_OPTIONS = ["yes", "no"]
+ENVIRONMENT_OPTIONS = ["bare_metal", "vm", "lxc"]
 
 
 @dataclass(frozen=True, kw_only=True)
-class SystemSensorDescription(SensorEntityDescription):
-    """A sensor read from the system group."""
+class HostSensorDescription(SensorEntityDescription):
+    """A sensor read from the latest state of the Host."""
 
-    value: Callable[[System], float | None]
+    value: Callable[[HostConnection], StateType | datetime]
+    # False while the thing the sensor shows is gone, for example a mount.
+    exists: Callable[[HostConnection], bool] = lambda connection: True
+    # Name lists go here. They are never recorded (v1 spec §7.4).
+    attributes: Callable[[HostConnection], dict[str, Any]] | None = None
+
+
+def _timestamp(text: str | None) -> datetime | None:
+    return dt_util.parse_datetime(text) if text else None
+
+
+def _has(capability: str) -> Callable[[HostConnection], bool]:
+    return lambda connection: capability in connection.capabilities
 
 
 SYSTEM_SENSORS = (
-    SystemSensorDescription(
+    HostSensorDescription(
         key="cpu_usage",
         translation_key="cpu_usage",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
-        value=lambda system: system.cpu_percent,
+        value=lambda c: c.groups.system.cpu_percent if c.groups.system else None,
     ),
-    SystemSensorDescription(
+    HostSensorDescription(
         key="memory_usage",
         translation_key="memory_usage",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
-        value=lambda system: system.memory_percent,
+        value=lambda c: c.groups.system.memory_percent if c.groups.system else None,
     ),
-    SystemSensorDescription(
+    HostSensorDescription(
         key="swap_usage",
         translation_key="swap_usage",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
         entity_registry_enabled_default=False,
-        value=lambda system: system.swap_percent,
+        value=lambda c: c.groups.system.swap_percent if c.groups.system else None,
+    ),
+    HostSensorDescription(
+        key="last_boot",
+        translation_key="last_boot",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value=lambda c: _timestamp(c.groups.flags.last_boot) if c.groups.flags else None,
+    ),
+    HostSensorDescription(
+        key="reboot_required",
+        translation_key="reboot_required",
+        device_class=SensorDeviceClass.ENUM,
+        options=REBOOT_REQUIRED_OPTIONS,
+        # "unknown" is shown as HA's unknown state.
+        value=lambda c: (
+            c.groups.flags.reboot_required
+            if c.groups.flags and c.groups.flags.reboot_required in REBOOT_REQUIRED_OPTIONS
+            else None
+        ),
+    ),
+    HostSensorDescription(
+        key="environment",
+        translation_key="environment",
+        device_class=SensorDeviceClass.ENUM,
+        options=ENVIRONMENT_OPTIONS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value=lambda c: c.hello.environment if c.hello else None,
+    ),
+    HostSensorDescription(
+        key="kernel",
+        translation_key="kernel",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value=lambda c: c.hello.kernel if c.hello else None,
+    ),
+    HostSensorDescription(
+        key="protocol_version",
+        translation_key="protocol_version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value=lambda c: c.hello.protocol_version if c.hello else None,
     ),
 )
+
+CAPABILITY_SENSORS = (
+    HostSensorDescription(
+        key="load_1",
+        translation_key="load_1",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        exists=_has("load"),
+        value=lambda c: c.groups.system.load_1 if c.groups.system else None,
+    ),
+    HostSensorDescription(
+        key="load_5",
+        translation_key="load_5",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        entity_registry_enabled_default=False,
+        exists=_has("load"),
+        value=lambda c: c.groups.system.load_5 if c.groups.system else None,
+    ),
+    HostSensorDescription(
+        key="load_15",
+        translation_key="load_15",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        entity_registry_enabled_default=False,
+        exists=_has("load"),
+        value=lambda c: c.groups.system.load_15 if c.groups.system else None,
+    ),
+    HostSensorDescription(
+        key="cpu_temperature",
+        translation_key="cpu_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        exists=_has("temperatures"),
+        value=lambda c: c.groups.temperatures.cpu_celsius if c.groups.temperatures else None,
+    ),
+    HostSensorDescription(
+        key="failed_services",
+        translation_key="failed_services",
+        state_class=SensorStateClass.MEASUREMENT,
+        exists=_has("failed_services"),
+        value=lambda c: c.groups.failed_services.count if c.groups.failed_services else None,
+        attributes=lambda c: {"services": c.groups.failed_services.names if c.groups.failed_services else []},
+    ),
+    HostSensorDescription(
+        key="available_updates",
+        translation_key="available_updates",
+        state_class=SensorStateClass.MEASUREMENT,
+        exists=_has("available_updates"),
+        value=lambda c: c.groups.available_updates.count if c.groups.available_updates else None,
+    ),
+)
+
+
+def _mount(connection: HostConnection, path: str) -> Mount | None:
+    disks = connection.groups.disks if "disks" in connection.capabilities else None
+    return next((mount for mount in disks.mounts if mount.mount == path), None) if disks else None
+
+
+def _interface(connection: HostConnection, name: str) -> Interface | None:
+    network = connection.groups.network if "network" in connection.capabilities else None
+    return next((item for item in network.interfaces if item.name == name), None) if network else None
+
+
+def _mount_sensors(path: str) -> Iterator[HostSensorDescription]:
+    exists = lambda c: _mount(c, path) is not None  # noqa: E731
+    yield HostSensorDescription(
+        key=f"disk_used_{path}",
+        translation_key="disk_used",
+        translation_placeholders={"mount": path},
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        exists=exists,
+        value=lambda c: mount.used_percent if (mount := _mount(c, path)) else None,
+    )
+    yield HostSensorDescription(
+        key=f"disk_free_{path}",
+        translation_key="disk_free",
+        translation_placeholders={"mount": path},
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.BYTES,
+        suggested_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        entity_registry_enabled_default=False,
+        exists=exists,
+        value=lambda c: mount.free_bytes if (mount := _mount(c, path)) else None,
+    )
+
+
+def _interface_sensors(name: str) -> Iterator[HostSensorDescription]:
+    exists = lambda c: _interface(c, name) is not None  # noqa: E731
+    for key, field in (("download", "rx_bytes_per_second"), ("upload", "tx_bytes_per_second")):
+        yield HostSensorDescription(
+            key=f"{key}_{name}",
+            translation_key=key,
+            translation_placeholders={"interface": name},
+            device_class=SensorDeviceClass.DATA_RATE,
+            native_unit_of_measurement=UnitOfDataRate.BYTES_PER_SECOND,
+            suggested_unit_of_measurement=UnitOfDataRate.MEGABITS_PER_SECOND,
+            state_class=SensorStateClass.MEASUREMENT,
+            suggested_display_precision=2,
+            exists=exists,
+            value=lambda c, field=field: getattr(item, field) if (item := _interface(c, name)) else None,
+        )
+    for key, field in (("downloaded", "rx_bytes_total"), ("uploaded", "tx_bytes_total")):
+        yield HostSensorDescription(
+            key=f"{key}_{name}",
+            translation_key=key,
+            translation_placeholders={"interface": name},
+            device_class=SensorDeviceClass.DATA_SIZE,
+            native_unit_of_measurement=UnitOfInformation.BYTES,
+            suggested_unit_of_measurement=UnitOfInformation.GIGABYTES,
+            state_class=SensorStateClass.TOTAL_INCREASING,
+            suggested_display_precision=1,
+            entity_registry_enabled_default=False,
+            exists=exists,
+            value=lambda c, field=field: getattr(item, field) if (item := _interface(c, name)) else None,
+        )
+
+
+def _descriptions(connection: HostConnection) -> Iterator[HostSensorDescription]:
+    """Every sensor the Host has now: fixed ones, then one per capability, mount, and interface."""
+    yield from SYSTEM_SENSORS
+    yield from (description for description in CAPABILITY_SENSORS if description.exists(connection))
+    if "disks" in connection.capabilities and connection.groups.disks:
+        for mount in connection.groups.disks.mounts:
+            yield from _mount_sensors(mount.mount)
+    if "network" in connection.capabilities and connection.groups.network:
+        for item in connection.groups.network.interfaces:
+            yield from _interface_sensors(item.name)
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: HostbeaconConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    """Add the sensors of one Host."""
+    """Add the sensors of one Host, and new ones when the Host reports them."""
     connection = entry.runtime_data
-    async_add_entities(
-        [
-            HostStatusSensor(entry, connection),
-            *(SystemSensor(entry, connection, description) for description in SYSTEM_SENSORS),
-        ]
-    )
+    added: set[str] = set()
+
+    @callback
+    def add_new_sensors() -> None:
+        new = [description for description in _descriptions(connection) if description.key not in added]
+        added.update(description.key for description in new)
+        async_add_entities(HostSensor(entry, connection, description) for description in new)
+
+    async_add_entities([HostStatusSensor(entry, connection), LastSeenSensor(entry, connection)])
+    add_new_sensors()
+    entry.async_on_unload(connection.add_listener(add_new_sensors))
 
 
 class HostEntity(SensorEntity):
@@ -83,7 +287,8 @@ class HostEntity(SensorEntity):
         self._connection = connection
         # Entity unique IDs are <Host ID>_<entity key>.
         self._attr_unique_id = f"{entry.unique_id}_{key}"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.unique_id)}, name=entry.title)
+        # The device is made and kept up to date in __init__.py.
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.unique_id)})
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(self._connection.add_listener(self.async_write_ha_state))
@@ -112,18 +317,48 @@ class HostStatusSensor(HostEntity):
         return "online" if self._connection.online else "offline"
 
 
-class SystemSensor(HostEntity):
-    """A value from the system group."""
+class LastSeenSensor(HostEntity):
+    """When the Agent was last seen. Always available, so it shows when an Offline Host was last there."""
 
-    entity_description: SystemSensorDescription
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_translation_key = "last_seen"
+
+    def __init__(self, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
+        super().__init__(entry, connection, "last_seen")
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._connection.last_seen
+
+
+class HostSensor(HostEntity):
+    """A value from the Host's latest state."""
+
+    entity_description: HostSensorDescription
+    # Names of services never go into HA history (v1 spec §7.4).
+    _unrecorded_attributes = frozenset({"services"})
 
     def __init__(
-        self, entry: HostbeaconConfigEntry, connection: HostConnection, description: SystemSensorDescription
+        self, entry: HostbeaconConfigEntry, connection: HostConnection, description: HostSensorDescription
     ) -> None:
         super().__init__(entry, connection, description.key)
         self.entity_description = description
 
     @property
-    def native_value(self) -> float | None:
-        system = self._connection.system
-        return self.entity_description.value(system) if system else None
+    def available(self) -> bool:
+        return self._connection.online and self.entity_description.exists(self._connection)
+
+    @property
+    def native_value(self) -> StateType | datetime:
+        return self.entity_description.value(self._connection)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attributes = self.entity_description.attributes
+        return attributes(self._connection) if attributes else None

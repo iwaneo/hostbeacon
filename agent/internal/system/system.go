@@ -1,6 +1,8 @@
-// Package system reads the system group: CPU, memory, and swap. It needs no
-// root. Values are rounded, so a delta is sent only when a shown value
-// changes: percentages to whole numbers, byte counts to 3 significant digits.
+// Package system is the Agent's system layer: it reads the Host's state
+// groups from files under a root directory ("/" on a Host), from commands,
+// and from systemd. It needs no root. Values are rounded, so a delta is sent
+// only when a shown value changes: percentages and temperatures to whole
+// numbers, rates and byte counts to 3 significant digits, load to 2 decimals.
 package system
 
 import (
@@ -14,22 +16,24 @@ import (
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
 )
 
-// Sampler reads /proc under a root directory ("/" on a Host).
+// Sampler reads the system group from /proc under a root directory.
 type Sampler struct {
 	root    string
+	load    bool
 	lastCPU *cpuTimes
 }
 
 type cpuTimes struct{ busy, total uint64 }
 
-// NewSampler reads /proc under root.
-func NewSampler(root string) *Sampler {
-	return &Sampler{root: root}
+// NewSampler reads /proc under root. Without load, the load values stay
+// null (in LXC they would show the hypervisor's load).
+func NewSampler(root string, load bool) *Sampler {
+	return &Sampler{root: root, load: load}
 }
 
 // Sample reads the system group. CPU usage is the average since the last
 // Sample, so the first one has no CPU value. A value that cannot be read is
-// null. Load is not read yet.
+// null.
 func (s *Sampler) Sample() protocol.System {
 	var sample protocol.System
 	if cpu, ok := s.readCPU(); ok {
@@ -49,7 +53,32 @@ func (s *Sampler) Sample() protocol.System {
 	if total, free := memory["SwapTotal"], memory["SwapFree"]; total > 0 && free <= total {
 		sample.SwapPercent = percent(float64(total-free) / float64(total))
 	}
+	if s.load {
+		sample.Load1, sample.Load5, sample.Load15 = s.readLoad()
+	}
 	return sample
+}
+
+// readLoad reads the 1, 5, and 15 minute load from /proc/loadavg.
+func (s *Sampler) readLoad() (load1, load5, load15 *float64) {
+	data, err := os.ReadFile(filepath.Join(s.root, "proc", "loadavg"))
+	if err != nil {
+		return nil, nil, nil
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) < 3 {
+		return nil, nil, nil
+	}
+	var values [3]*float64
+	for i := range values {
+		value, err := strconv.ParseFloat(fields[i], 64)
+		if err != nil || !(value >= 0) || math.IsInf(value, 1) {
+			return nil, nil, nil
+		}
+		value = math.Round(value*100) / 100
+		values[i] = &value
+	}
+	return values[0], values[1], values[2]
 }
 
 // readCPU reads the total line of /proc/stat. Idle time is idle plus iowait;

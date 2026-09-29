@@ -5,11 +5,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from collections.abc import AsyncIterator, Callable
-from pathlib import Path
-from unittest.mock import patch
+from collections.abc import Callable
 
-import pytest
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
@@ -20,22 +17,6 @@ from homeassistant.helpers import entity_registry as er
 from custom_components.hostbeacon.const import CONF_CODE, CONF_FINGERPRINT, CONF_KEY, DOMAIN
 
 from .fake_agent import FakeAgent, system
-
-
-@pytest.fixture(autouse=True)
-def fast_reconnect() -> None:
-    with patch("custom_components.hostbeacon.connection.BACKOFF_START", 0.05), patch(
-        "custom_components.hostbeacon.connection.BACKOFF_MAX", 0.2
-    ):
-        yield
-
-
-@pytest.fixture
-async def agent(tmp_path: Path, socket_enabled: None) -> AsyncIterator[FakeAgent]:
-    fake = FakeAgent(tmp_path)
-    await fake.start()
-    yield fake
-    await fake.stop()
 
 
 async def wait_for(check: Callable[[], bool], timeout: float = 5) -> None:
