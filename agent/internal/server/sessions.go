@@ -45,8 +45,10 @@ type pairingState struct {
 	// reserved counts logins whose WebSocket is not accepted yet.
 	reserved    int
 	connections map[*websocket.Conn]struct{}
-	messages    bucket
-	actions     bucket
+	// removed is set once the Pairing's connections are being closed.
+	removed  bool
+	messages bucket
+	actions  bucket
 }
 
 // sessions holds the open connections and the rate limits of each Pairing.
@@ -114,19 +116,25 @@ func (s *sessions) allowMessage(id string, action bool) bool {
 	return !action || state.actions.take(s.actionsPerMinute, now)
 }
 
-// closeRemoved closes every connection whose Pairing is not in kept.
-func (s *sessions) closeRemoved(kept []pairing.Pairing) {
+// closeRemoved closes every connection whose Pairing is not in kept, and
+// returns the IDs of the Pairings whose connections it closed.
+func (s *sessions) closeRemoved(kept []pairing.Pairing) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id := range s.pairings {
+	var closed []string
+	for id, state := range s.pairings {
 		found := false
 		for _, p := range kept {
 			found = found || p.ID == id
 		}
-		if !found {
+		if !found && !state.removed {
+			if len(state.connections) > 0 {
+				closed = append(closed, id)
+			}
 			s.closePairingLocked(id)
 		}
 	}
+	return closed
 }
 
 // closePairing closes every connection of the Pairing.
@@ -138,9 +146,10 @@ func (s *sessions) closePairing(id string) {
 
 func (s *sessions) closePairingLocked(id string) {
 	state, found := s.pairings[id]
-	if !found {
+	if !found || state.removed {
 		return
 	}
+	state.removed = true
 	for ws := range state.connections {
 		go ws.Close(websocket.StatusPolicyViolation, "Pairing removed")
 	}
@@ -179,7 +188,9 @@ func (s *Server) watchPairings(ctx context.Context, interval time.Duration) {
 				s.Log.Error("cannot read the Pairings", "error", err)
 				continue
 			}
-			s.sessions.closeRemoved(list)
+			for _, id := range s.sessions.closeRemoved(list) {
+				s.Log.Info("closed the connections of a removed Pairing", "id", id)
+			}
 		}
 	}
 }
