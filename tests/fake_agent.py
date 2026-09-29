@@ -90,6 +90,14 @@ class FakeAgent:
         self.answer_actions = True
         # A result sent right after the ack of an accepted Action.
         self.result_at_once: protocol.ActionOutcome | None = None
+        self.agent_version = "0.1.0"
+        self.newest_agent_version: str | None = None
+        # The protocol majors in hello. With none in common with Home
+        # Assistant, the connection is in limited mode.
+        self.protocol_majors = protocol.PROTOCOL_MAJORS
+        # Action results each new connection gets after its snapshot, as the
+        # Agent sends the result of an Agent update after it restarted.
+        self.results_on_connect: list[protocol.ActionResult] = []
         self.environment: str | None = "vm"
         self.kernel: str | None = "6.12.48+deb13-amd64"
         # The groups other than agent, system, and update_run.
@@ -186,8 +194,8 @@ class FakeAgent:
     def _agent_info(self) -> protocol.AgentInfo:
         return protocol.AgentInfo(
             hostname=self.hostname,
-            agent_version="0.1.0",
-            newest_agent_version=None,
+            agent_version=self.agent_version,
+            newest_agent_version=self.newest_agent_version,
             capabilities=self.capabilities,
             enabled_actions=self.enabled_actions,
         )
@@ -233,13 +241,13 @@ class FakeAgent:
             hello = protocol.HelloRequest(
                 id="hello-1",
                 protocol_version=protocol.PROTOCOL_VERSION,
-                protocol_majors=protocol.PROTOCOL_MAJORS,
+                protocol_majors=self.protocol_majors,
                 instance_id=self.instance_id,
                 run_id=self.run_id,
                 copied_from=self.copied_from,
                 hostname=self.hostname,
-                agent_version="0.1.0",
-                newest_agent_version=None,
+                agent_version=self.agent_version,
+                newest_agent_version=self.newest_agent_version,
                 capabilities=self.capabilities,
                 enabled_actions=self.enabled_actions,
                 environment=self.environment,
@@ -252,7 +260,12 @@ class FakeAgent:
             if reply.type != WSMsgType.TEXT or not isinstance(answer := protocol.decode(reply.data), protocol.HelloReply):
                 return socket
             self.host_ids.append(answer.host_id)
-            await socket.send_str(protocol.encode(self._snapshot()))
+            # Limited mode: no state, and only Agent update and pairing_remove.
+            limited = not set(answer.protocol_majors) & set(self.protocol_majors)
+            if not limited:
+                await socket.send_str(protocol.encode(self._snapshot()))
+            for result in self.results_on_connect:
+                await socket.send_str(protocol.encode(result))
             async for frame in socket:
                 if frame.type != WSMsgType.TEXT:
                     continue
@@ -263,6 +276,8 @@ class FakeAgent:
                     await socket.send_str(protocol.encode(reply))
                     await socket.close()
                 elif isinstance(request, protocol.ActionRequest):
+                    if limited and request.action != "agent_update":
+                        continue
                     self.action_requests.append(request)
                     if self.answer_actions:
                         ack, outcome = self._ack(request), self.result_at_once

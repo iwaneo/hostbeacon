@@ -38,6 +38,9 @@ ACK_TIMEOUT = 30
 REBOOT_TIMEOUT = timedelta(minutes=15)
 # Update run states while the run goes on: Host status is Updating.
 RUN_ACTIVE = ("waiting_for_lock", "running")
+# How long Install waits for the result of an Agent update. The Agent may
+# wait 5 minutes for the package manager, download, and check its health.
+AGENT_UPDATE_TIMEOUT = 20 * 60
 
 
 class ActionError(Exception):
@@ -61,6 +64,13 @@ def _hello_reply(hello: protocol.HelloRequest, host_id: str | None = None) -> pr
         protocol_majors=protocol.PROTOCOL_MAJORS,
         host_id=host_id,
     )
+
+
+def _limited(agent_majors: list[int]) -> str | None:
+    """Which side to update when the two share no protocol major, else None."""
+    if set(agent_majors) & set(protocol.PROTOCOL_MAJORS):
+        return None
+    return "agent" if max(agent_majors, default=0) < min(protocol.PROTOCOL_MAJORS) else "integration"
 
 
 def _connect(
@@ -163,6 +173,10 @@ class HostConnection:
         # Why the Agent cannot be used: "certificate" or "key". None when it works.
         self.problem: str | None = None
         self.online = False
+        # Limited mode (v1 spec §6.5): connected, but no protocol major in
+        # common. "agent" when the Agent is older, "integration" when this
+        # Integration is. The Host is Offline; only Agent update works.
+        self.limited: str | None = None
         # The latest hello and state groups. They stay while Offline.
         self.hello: protocol.HelloRequest | None = None
         self.groups = protocol.Groups()
@@ -176,20 +190,35 @@ class HostConnection:
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         # The pending Action requests by message ID: the Action and its answer.
         self._acks: dict[str, tuple[str, asyncio.Future[protocol.ActionAck]]] = {}
+        # The awaited Action results by Action ID. They may come on a later
+        # connection: the Agent update restarts the Agent.
+        self._results: dict[str, asyncio.Future[protocol.ActionResult]] = {}
+
+    @property
+    def _agent(self) -> protocol.AgentInfo | protocol.HelloRequest | None:
+        """The latest agent group; in limited mode, which sends no state, the hello."""
+        if self.groups.agent is not None and not self.limited:
+            return self.groups.agent
+        return self.hello
 
     @property
     def capabilities(self) -> list[str]:
         """The data sources that work on the Host, from the latest agent group."""
-        if self.groups.agent is not None:
-            return self.groups.agent.capabilities
-        return self.hello.capabilities if self.hello else []
+        return self._agent.capabilities if self._agent else []
 
     @property
     def enabled_actions(self) -> list[str]:
         """The Actions the owner enabled on the Host, from the latest agent group."""
-        if self.groups.agent is not None:
-            return self.groups.agent.enabled_actions
-        return self.hello.enabled_actions if self.hello else []
+        return self._agent.enabled_actions if self._agent else []
+
+    @property
+    def agent_version(self) -> str | None:
+        return self._agent.agent_version if self._agent else None
+
+    @property
+    def newest_agent_version(self) -> str | None:
+        """The newest Agent release, from the Agent's signed check. None until it checked."""
+        return self._agent.newest_agent_version if self._agent else None
 
     @property
     def host_status(self) -> str:
@@ -248,7 +277,8 @@ class HostConnection:
         Assistant never repeats an Action ID older than 1 hour.
         """
         ws = self._ws
-        if ws is None or not self.online:
+        # In limited mode, only the Agent update works.
+        if ws is None or not (self.online or (self.limited and action == "agent_update")):
             raise ActionError
         request = protocol.ActionRequest(id=str(uuid.uuid4()), action_id=str(uuid.uuid4()), action=action, user=user)
         answer = asyncio.get_running_loop().create_future()
@@ -261,6 +291,18 @@ class HostConnection:
             raise ActionError from err
         finally:
             del self._acks[request.id]
+
+    async def wait_for_action_result(self, action_id: str, timeout: float) -> protocol.ActionResult:
+        """Wait for the result of an accepted Action, also across reconnects.
+
+        Raises TimeoutError when it does not come within timeout.
+        """
+        result = self._results.setdefault(action_id, asyncio.get_running_loop().create_future())
+        try:
+            async with asyncio.timeout(timeout):
+                return await result
+        finally:
+            del self._results[action_id]
 
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
         """Call listener on every change. Returns a function that removes it."""
@@ -286,7 +328,7 @@ class HostConnection:
                     _LOGGER.debug("Cannot connect to %s: HTTP %s", self._name, err.status)
             except (aiohttp.ClientError, OSError, TimeoutError) as err:
                 _LOGGER.debug("Connection to %s ended: %s", self._name, type(err).__name__)
-            if self.online:
+            if self.online or self.limited:
                 backoff = BACKOFF_START
                 self._set_offline()
             await asyncio.sleep(backoff * random.uniform(0.8, 1.2))
@@ -301,6 +343,7 @@ class HostConnection:
 
     def _set_offline(self) -> None:
         self.online = False
+        self.limited = None
         self.last_seen = dt_util.utcnow()
         self._changed()
 
@@ -333,10 +376,21 @@ class HostConnection:
         match message:
             case protocol.HelloRequest():
                 self.hello = message
+                self.limited = _limited(message.protocol_majors)
+                if self.limited:
+                    _LOGGER.warning(
+                        "%s speaks protocol %s and this Integration %s: only Agent update works until one is updated",
+                        self._name,
+                        message.protocol_majors,
+                        protocol.PROTOCOL_MAJORS,
+                    )
+                    self.problem = None
+                    self._changed()
                 return _hello_reply(message, self._host_id)
             case protocol.Snapshot():
                 self.groups = message.groups
                 self._keep_last_run()
+                self.limited = None
                 self.online = True
                 if self.problem is not None:
                     _LOGGER.info("%s is connected again", self._name)
@@ -363,9 +417,12 @@ class HostConnection:
                 if action == "reboot" and message.status == "accepted":
                     self._start_reboot()
                 answer.set_result(message)
-            case protocol.ActionResult(action="reboot", result="failed"):
-                _LOGGER.error("Reboot of %s failed: %s", self._name, message.error)
-                self.end_reboot()
+            case protocol.ActionResult():
+                if (result := self._results.get(message.action_id)) is not None and not result.done():
+                    result.set_result(message)
+                if message.action == "reboot" and message.result == "failed":
+                    _LOGGER.error("Reboot of %s failed: %s", self._name, message.error)
+                    self.end_reboot()
             case protocol.Unknown():
                 return protocol.unsupported_reply(message, str(uuid.uuid4()))
         return None
