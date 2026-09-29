@@ -311,31 +311,53 @@ func TestTwoPairingsWorkIndependently(t *testing.T) {
 	}
 }
 
-func TestRemoveByUniqueName(t *testing.T) {
+func TestFindByIDOrUniqueName(t *testing.T) {
 	h := newHost(t)
-	h.login(t, "Home")
-	office := h.login(t, "Office")
-	if _, err := h.pairings.Remove("Home"); err != nil {
-		t.Fatal(err)
-	}
-	list, _ := h.pairings.List()
-	if len(list) != 1 || list[0].ID != ID(office) {
-		t.Errorf("List = %+v, want only Office", list)
+	home := h.login(t, "Home")
+	h.login(t, "Office")
+	for _, idOrName := range []string{"Home", ID(home)} {
+		if p, err := h.pairings.Find(idOrName); err != nil || p.ID != ID(home) {
+			t.Errorf("Find(%q) = %+v, %v; want Home", idOrName, p, err)
+		}
 	}
 }
 
-func TestRemoveRefusesAnAmbiguousOrUnknownName(t *testing.T) {
+func TestFindRefusesAnAmbiguousOrUnknownName(t *testing.T) {
 	h := newHost(t)
 	h.login(t, "Home")
 	h.login(t, "Home")
-	if _, err := h.pairings.Remove("Home"); !errors.Is(err, ErrAmbiguous) {
+	if _, err := h.pairings.Find("Home"); !errors.Is(err, ErrAmbiguous) {
 		t.Errorf("err = %v, want ErrAmbiguous", err)
 	}
-	if _, err := h.pairings.Remove("nothing"); !errors.Is(err, ErrNotFound) {
+	if _, err := h.pairings.Find("nothing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
-	if list, _ := h.pairings.List(); len(list) != 2 {
-		t.Errorf("List has %d Pairings, want 2 (nothing removed)", len(list))
+}
+
+// Home Assistant removes its Pairing by ID; a name must never match.
+func TestRemoveTakesOnlyAnID(t *testing.T) {
+	h := newHost(t)
+	h.login(t, "Home")
+	if _, err := h.pairings.Remove("Home"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	if list, _ := h.pairings.List(); len(list) != 1 {
+		t.Errorf("List has %d Pairings, want 1 (nothing removed)", len(list))
+	}
+}
+
+// A Home Assistant that stays connected for months is not stale.
+func TestSeenUpdatesLastSeenOfConnectedPairings(t *testing.T) {
+	h := newHost(t)
+	home := h.login(t, "Home")
+	h.login(t, "Office")
+	h.now = start.Add(100 * 24 * time.Hour)
+	if err := h.pairings.Seen([]string{ID(home), "gone0000"}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := h.pairings.List()
+	if !list[0].LastSeen.Equal(h.now) || !list[1].LastSeen.Equal(start) {
+		t.Errorf("List = %+v, want only Home seen now", list)
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -66,7 +67,12 @@ var (
 // tell the owner which Pairing to remove.
 func ID(key []byte) string {
 	sum := sha256.Sum256(key)
-	return hex.EncodeToString(sum[:4])
+	return idOf(hex.EncodeToString(sum[:]))
+}
+
+// idOf is the Pairing ID for the hex SHA-256 of a key.
+func idOf(keySHA256 string) string {
+	return keySHA256[:min(8, len(keySHA256))]
 }
 
 // CodeKey stretches a Pairing code. nonce is the one Home Assistant sent.
@@ -175,7 +181,7 @@ func (p pairing) public() Pairing {
 	if lastSeen.IsZero() {
 		lastSeen = p.Created
 	}
-	return Pairing{ID: p.KeySHA256[:min(8, len(p.KeySHA256))], Name: p.Name, Created: p.Created, LastSeen: lastSeen}
+	return Pairing{ID: idOf(p.KeySHA256), Name: p.Name, Created: p.Created, LastSeen: lastSeen}
 }
 
 type pairingList struct {
@@ -315,38 +321,65 @@ func (p *Pairings) List() ([]Pairing, error) {
 	return list, err
 }
 
-// Remove deletes the Pairing with this ID, or with this name if only one
-// Pairing has it. Its key stops working at once.
-func (p *Pairings) Remove(idOrName string) (Pairing, error) {
+// Find returns the Pairing with this ID, or with this name if only one
+// Pairing has it.
+func (p *Pairings) Find(idOrName string) (Pairing, error) {
+	list, err := p.List()
+	if err != nil {
+		return Pairing{}, err
+	}
+	for _, matches := range []func(Pairing) bool{
+		func(item Pairing) bool { return item.ID == idOrName },
+		func(item Pairing) bool { return item.Name == idOrName },
+	} {
+		found := slices.DeleteFunc(slices.Clone(list), func(item Pairing) bool { return !matches(item) })
+		switch len(found) {
+		case 0:
+			continue
+		case 1:
+			return found[0], nil
+		}
+		return Pairing{}, ErrAmbiguous
+	}
+	return Pairing{}, ErrNotFound
+}
+
+// Remove deletes the Pairing with this ID. Its key stops working at once.
+func (p *Pairings) Remove(id string) (Pairing, error) {
 	var removed Pairing
 	err := p.update(func(list *pairingList) (bool, error) {
-		match := -1
-		for i, item := range list.Pairings {
-			if item.public().ID == idOrName {
-				if match >= 0 {
-					return false, ErrAmbiguous
-				}
-				match = i
+		var matches []Pairing
+		kept := slices.DeleteFunc(slices.Clone(list.Pairings), func(item pairing) bool {
+			if item.public().ID != id {
+				return false
 			}
-		}
-		if match < 0 {
-			for i, item := range list.Pairings {
-				if item.Name == idOrName {
-					if match >= 0 {
-						return false, ErrAmbiguous
-					}
-					match = i
-				}
-			}
-		}
-		if match < 0 {
+			matches = append(matches, item.public())
+			return true
+		})
+		switch len(matches) {
+		case 0:
 			return false, ErrNotFound
+		case 1:
+			removed, list.Pairings = matches[0], kept
+			return true, nil
 		}
-		removed = list.Pairings[match].public()
-		list.Pairings = append(list.Pairings[:match], list.Pairings[match+1:]...)
-		return true, nil
+		return false, ErrAmbiguous
 	})
 	return removed, err
+}
+
+// Seen sets the last seen time of the Pairings with these IDs to now. The
+// Agent calls it for Pairings that stay connected.
+func (p *Pairings) Seen(ids []string) error {
+	return p.update(func(list *pairingList) (bool, error) {
+		now := p.now().UTC()
+		for i, item := range list.Pairings {
+			if slices.Contains(ids, item.public().ID) {
+				list.Pairings[i].LastSeen = now
+			}
+		}
+		return true, nil
+	})
 }
 
 // update reads the Pairings file, calls change, and writes the file back if

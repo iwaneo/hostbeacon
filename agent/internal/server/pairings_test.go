@@ -158,3 +158,20 @@ func TestOpenConnectionsPerPairingAreCapped(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	home.connect(t) // a slot is free again
 }
+
+func TestConnectedPairingIsSeenWhileItStaysConnected(t *testing.T) {
+	a := startAgent(t, func(s *Server) {
+		s.PairingCheckInterval = 20 * time.Millisecond
+		s.LastSeenInterval = 50 * time.Millisecond
+	})
+	ha, _ := pair(t, a, a.newCode(t))
+	ha.connect(t)
+	list, _ := a.server.Pairings.List()
+	loggedIn := list[0].LastSeen
+
+	time.Sleep(300 * time.Millisecond)
+	list, _ = a.server.Pairings.List()
+	if !list[0].LastSeen.After(loggedIn) {
+		t.Errorf("last seen = %v, want later than the login at %v", list[0].LastSeen, loggedIn)
+	}
+}

@@ -20,7 +20,7 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from .connection import can_log_in
 from .const import CONF_CODE, CONF_FINGERPRINT, CONF_KEY, DEFAULT_PORT, DOMAIN
 from .pairing import (
-    UUID,
+    UUID_PATTERN,
     CannotConnect,
     InvalidCode,
     PairingFailed,
@@ -70,7 +70,7 @@ class HostbeaconConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> ConfigFlowResult:
         """Offer to pair a discovered Host, or follow a paired one to its new address."""
         instance_id = discovery_info.properties.get("id")
-        if not isinstance(instance_id, str) or not UUID.fullmatch(instance_id) or not discovery_info.port:
+        if not isinstance(instance_id, str) or not UUID_PATTERN.fullmatch(instance_id) or not discovery_info.port:
             return self.async_abort(reason="invalid_discovery_info")
         host, port = discovery_info.host, discovery_info.port
         await self.async_set_unique_id(instance_id)
@@ -148,8 +148,10 @@ class HostbeaconConfigFlow(ConfigFlow, domain=DOMAIN):
             except PairingFailed:
                 errors["base"] = "pairing_failed"
             else:
-                # Host ID = the Agent instance ID at the first Pairing.
-                await self.async_set_unique_id(paired.instance_id)
+                # Host ID = the Agent instance ID at the first Pairing. The code
+                # is used up now, so a discovery flow for the same Host must not
+                # stop this one.
+                await self.async_set_unique_id(paired.instance_id, raise_on_progress=False)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=paired.hostname,

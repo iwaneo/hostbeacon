@@ -190,3 +190,15 @@ async def test_reconfigure_to_an_address_without_an_agent(
     assert result["errors"] == {"base": "cannot_connect"}
     await asyncio.sleep(0)
     assert entry.data[CONF_PORT] == agent.port
+
+
+async def test_add_by_address_works_while_the_host_waits_in_discovered(
+    hass: HomeAssistant, agent: FakeAgent
+) -> None:
+    discovered = await discover(hass, announcement(agent))
+    assert discovered["step_id"] == "pair"
+
+    entry = await add_host(hass, agent)
+    assert entry.unique_id == agent.instance_id
+    await hass.async_block_till_done()
+    assert not any(f["flow_id"] == discovered["flow_id"] for f in hass.config_entries.flow.async_progress())

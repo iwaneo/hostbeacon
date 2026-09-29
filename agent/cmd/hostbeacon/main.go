@@ -104,10 +104,10 @@ func pairings(args []string, out io.Writer, now time.Time, zone *time.Location) 
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
-	list := pairing.Open(*stateDir, time.Now)
+	store := pairing.Open(*stateDir, time.Now)
 	switch {
 	case args[0] == "list" && flags.NArg() == 0:
-		items, err := list.List()
+		items, err := store.List()
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,11 @@ func pairings(args []string, out io.Writer, now time.Time, zone *time.Location) 
 		}
 		return nil
 	case args[0] == "remove" && flags.NArg() == 1:
-		removed, err := list.Remove(flags.Arg(0))
+		found, err := store.Find(flags.Arg(0))
+		if err != nil {
+			return err
+		}
+		removed, err := store.Remove(found.ID)
 		if err != nil {
 			return err
 		}

@@ -27,7 +27,7 @@ ITERATIONS = 100_000
 SIZE = 32
 TIMEOUT = 10
 
-UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+UUID_PATTERN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 # Only for reading the fingerprint before Pairing: nothing secret is sent on
 # this connection.
@@ -151,7 +151,7 @@ async def pair(session: aiohttp.ClientSession, host: str, port: int, code: str, 
         instance_id, hostname = answer["instance_id"], answer["hostname"]
     except (KeyError, TypeError, ValueError) as err:  # also JSONDecodeError
         raise PairingFailed("the Agent's answer is malformed") from err
-    if not (isinstance(instance_id, str) and UUID.fullmatch(instance_id) and isinstance(hostname, str) and hostname):
+    if not (isinstance(instance_id, str) and UUID_PATTERN.fullmatch(instance_id) and isinstance(hostname, str) and hostname):
         raise PairingFailed("the Agent's answer is malformed")
     if len(new_key) != SIZE or not hmac.compare_digest(proof, agent_proof(stretched, fingerprint, nonce, new_key)):
         raise PairingFailed("the Agent did not prove it knows the code")

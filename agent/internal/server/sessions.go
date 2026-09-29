@@ -18,6 +18,7 @@ const (
 	defaultMessagesPerMinute        = 600
 	defaultActionsPerMinute         = 10
 	defaultPairingCheckInterval     = time.Second
+	defaultLastSeenInterval         = time.Hour
 )
 
 // bucket allows perMinute events a minute, and up to perMinute at once.
@@ -158,30 +159,41 @@ func (s *sessions) closePairingLocked(id string) {
 	}
 }
 
-// anyOpen says whether any Pairing has an open connection.
-func (s *sessions) anyOpen() bool {
+// connected returns the IDs of the Pairings with an open connection.
+func (s *sessions) connected() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, state := range s.pairings {
-		if len(state.connections) > 0 {
-			return true
+	var ids []string
+	for id, state := range s.pairings {
+		if len(state.connections) > 0 && !state.removed {
+			ids = append(ids, id)
 		}
 	}
-	return false
+	return ids
 }
 
 // watchPairings closes the connections of a Pairing soon after an owner
-// command removes it: hostbeacon pairings remove runs in another process.
-func (s *Server) watchPairings(ctx context.Context, interval time.Duration) {
+// command removes it: hostbeacon pairings remove runs in another process. It
+// also saves the last seen time of connected Pairings every seenInterval, so
+// a Home Assistant that stays connected is never reported as unseen.
+func (s *Server) watchPairings(ctx context.Context, interval, seenInterval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	lastSaved := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !s.sessions.anyOpen() {
+			connected := s.sessions.connected()
+			if len(connected) == 0 {
 				continue
+			}
+			if time.Since(lastSaved) >= seenInterval {
+				lastSaved = time.Now()
+				if err := s.Pairings.Seen(connected); err != nil {
+					s.Log.Error("cannot save the last seen time of the Pairings", "error", err)
+				}
 			}
 			list, err := s.Pairings.List()
 			if err != nil {

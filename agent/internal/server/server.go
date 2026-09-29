@@ -68,6 +68,9 @@ type Server struct {
 	MessagesPerMinute        int
 	ActionsPerMinute         int
 	PairingCheckInterval     time.Duration
+	// LastSeenInterval is how often the last seen time of a connected
+	// Pairing is saved. Zero means the default.
+	LastSeenInterval time.Duration
 
 	sessions *sessions
 }
@@ -82,7 +85,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 		actionsPerMinute:  orDefault(s.ActionsPerMinute, defaultActionsPerMinute),
 		pairings:          map[string]*pairingState{},
 	}
-	go s.watchPairings(ctx, orDefault(s.PairingCheckInterval, defaultPairingCheckInterval))
+	go s.watchPairings(ctx, orDefault(s.PairingCheckInterval, defaultPairingCheckInterval), orDefault(s.LastSeenInterval, defaultLastSeenInterval))
 	timeout := orDefault(s.UnauthenticatedTimeout, defaultUnauthenticatedTimeout)
 	limited := &listener{
 		Listener:  l,
@@ -235,6 +238,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.started(login.ID, ws)
 	defer s.sessions.closed(login.ID, ws)
+	// The Pairing may have been removed since Login, before the watcher could
+	// see this connection. From now on the watcher sees it, so check once more.
+	if _, err := s.Pairings.Find(login.ID); err != nil {
+		ws.Close(websocket.StatusPolicyViolation, "Pairing removed")
+		return
+	}
 	s.Log.Info("Home Assistant connected", "pairing", login.Name, "source", r.RemoteAddr)
 	err = s.session(r.Context(), ws, login)
 	s.Log.Info("Home Assistant disconnected", "pairing", login.Name, "reason", err)

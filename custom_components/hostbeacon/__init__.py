@@ -91,6 +91,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) 
         key,
     ):
         return
+    # strings.json has no category for notifications, so the texts are kept
+    # with the exceptions.
     texts = await async_get_translations(hass, hass.config.language, "exceptions", [DOMAIN])
     prefix = f"component.{DOMAIN}.exceptions."
     persistent_notification.async_create(
