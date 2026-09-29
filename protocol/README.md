@@ -36,8 +36,9 @@ Both writers refuse to write a message their own reader would refuse.
 
 The Agent listens on one TCP port (default `8743`) with TLS 1.3 and its own
 self-signed certificate. Home Assistant pins the SHA-256 fingerprint of that
-certificate (of its DER bytes) at Pairing. Two HTTP paths exist; everything
-else is 404, and any request with an `Origin` header is 403.
+certificate (of its DER bytes) at Pairing. Only the two requests below are
+answered; anything else gets 404 or 405, and any request with an `Origin`
+header gets 403.
 
 ### Pairing: `POST /v1/pair`
 
@@ -46,6 +47,7 @@ Answered only while a Pairing code is active (`hostbeacon pair`).
 1. Home Assistant reads the certificate fingerprint `fp` without trusting it,
    then sends the request on a connection pinned to `fp`.
 2. Request: `{"name": <Pairing name>, "nonce": <32 random bytes>, "proof": <HA proof>}`.
+   The name is 1 to 64 printable characters (else 400).
 3. The Agent checks the proof against its own `fp`. Wrong: 403, and one of
    the 5 tries is used. No active code, expired, used, or cancelled: 403.
 4. Right: the code is used up. Answer: `{"instance_id", "hostname", "key": <32 random bytes>, "proof": <Agent proof>}`.

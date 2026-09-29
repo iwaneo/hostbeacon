@@ -13,6 +13,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import re
 import secrets
 import ssl
@@ -75,12 +76,14 @@ def code_key(code: str, nonce: bytes) -> bytes:
     return hashlib.pbkdf2_hmac("sha256", _clean(code).encode(), b"hostbeacon pairing v1\x00" + nonce, ITERATIONS, SIZE)
 
 
-def home_assistant_proof(key: bytes, fingerprint: bytes, nonce: bytes) -> bytes:
-    return _mac(key, b"hostbeacon pair home assistant", fingerprint, nonce)
+def home_assistant_proof(stretched_code: bytes, fingerprint: bytes, nonce: bytes) -> bytes:
+    """What Home Assistant sends to prove it knows the code."""
+    return _mac(stretched_code, b"hostbeacon pair home assistant", fingerprint, nonce)
 
 
-def agent_proof(key: bytes, fingerprint: bytes, nonce: bytes, new_key: bytes) -> bytes:
-    return _mac(key, b"hostbeacon pair agent", fingerprint, nonce, new_key)
+def agent_proof(stretched_code: bytes, fingerprint: bytes, nonce: bytes, key: bytes) -> bytes:
+    """What the Agent answers to prove it knows the code. It also covers the new key."""
+    return _mac(stretched_code, b"hostbeacon pair agent", fingerprint, nonce, key)
 
 
 def _mac(key: bytes, label: bytes, *parts: bytes) -> bytes:
@@ -88,6 +91,7 @@ def _mac(key: bytes, label: bytes, *parts: bytes) -> bytes:
 
 
 def agent_url(host: str, port: int, path: str, scheme: str = "https") -> URL:
+    """The URL of path on the Agent. Works for IPv6 addresses too."""
     return URL.build(scheme=scheme, host=host, port=port, path=path)
 
 
@@ -105,15 +109,20 @@ async def fetch_fingerprint(host: str, port: int) -> bytes:
     return hashlib.sha256(certificate).digest()
 
 
+def pairing_name(name: str) -> str:
+    """The Pairing name the Agent accepts: 1 to 64 printable characters."""
+    return "".join(char for char in name if char.isprintable()).strip()[:64] or "Home Assistant"
+
+
 async def pair(session: aiohttp.ClientSession, host: str, port: int, code: str, name: str) -> Paired:
     """Run the Pairing step with the Agent at host and port."""
     fingerprint = await fetch_fingerprint(host, port)
     nonce = secrets.token_bytes(SIZE)
-    key = await asyncio.get_running_loop().run_in_executor(None, code_key, code, nonce)
+    stretched = await asyncio.get_running_loop().run_in_executor(None, code_key, code, nonce)
     body = {
-        "name": name[:64],
+        "name": pairing_name(name),
         "nonce": base64.b64encode(nonce).decode(),
-        "proof": base64.b64encode(home_assistant_proof(key, fingerprint, nonce)).decode(),
+        "proof": base64.b64encode(home_assistant_proof(stretched, fingerprint, nonce)).decode(),
     }
     try:
         async with session.post(
@@ -126,18 +135,19 @@ async def pair(session: aiohttp.ClientSession, host: str, port: int, code: str, 
                 raise InvalidCode
             if response.status != 200:
                 raise PairingFailed(f"the Agent answered HTTP {response.status}")
-            answer = await response.json()
+            text = await response.text()
     except (aiohttp.ClientError, TimeoutError) as err:
         raise CannotConnect from err
 
     try:
+        answer = json.loads(text)
         new_key = base64.b64decode(answer["key"], validate=True)
         proof = base64.b64decode(answer["proof"], validate=True)
         instance_id, hostname = answer["instance_id"], answer["hostname"]
-    except (KeyError, TypeError, ValueError) as err:
+    except (KeyError, TypeError, ValueError) as err:  # also JSONDecodeError
         raise PairingFailed("the Agent's answer is malformed") from err
     if not (isinstance(instance_id, str) and _UUID.fullmatch(instance_id) and isinstance(hostname, str) and hostname):
         raise PairingFailed("the Agent's answer is malformed")
-    if len(new_key) != SIZE or not hmac.compare_digest(proof, agent_proof(key, fingerprint, nonce, new_key)):
+    if len(new_key) != SIZE or not hmac.compare_digest(proof, agent_proof(stretched, fingerprint, nonce, new_key)):
         raise PairingFailed("the Agent did not prove it knows the code")
     return Paired(instance_id=instance_id, hostname=hostname, key=new_key, fingerprint=fingerprint)

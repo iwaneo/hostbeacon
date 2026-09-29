@@ -92,6 +92,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 		Handler:           refuseOrigin(mux),
 		ReadHeaderTimeout: timeout,
 		ReadTimeout:       timeout,
+		WriteTimeout:      timeout, // lifted by loggedIn before the WebSocket starts
 		MaxHeaderBytes:    8 << 10,
 		ErrorLog:          slog.NewLogLogger(s.Log.Handler(), slog.LevelDebug),
 		BaseContext:       func(net.Listener) context.Context { return ctx },

@@ -63,6 +63,7 @@ SYSTEM_SENSORS = (
 async def async_setup_entry(
     hass: HomeAssistant, entry: HostbeaconConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
+    """Add the sensors of one Host."""
     connection = entry.runtime_data
     async_add_entities(
         [
