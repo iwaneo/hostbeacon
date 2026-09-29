@@ -93,11 +93,12 @@ func serve(args []string) error {
 		LoadConfig: loadConfig,
 		Jobs:       helper.HostJobs{Root: "/", Run: run, Stream: command.ExecStream(env)},
 		Actions: &helper.ActionRunner{
-			Log:                 helper.ActionLog{Dir: *actionLog, Now: time.Now},
-			Journal:             log,
-			Uptime:              func() (time.Duration, error) { return helper.ReadUptime("/") },
-			PackageTaskLock:     helper.DefaultPackageTaskLock,
-			PackageManagerLocks: helper.DefaultPackageManagerLocks,
+			Log:                    helper.ActionLog{Dir: *actionLog, Now: time.Now},
+			Journal:                log,
+			Uptime:                 func() (time.Duration, error) { return helper.ReadUptime("/") },
+			PackageTaskLock:        helper.DefaultPackageTaskLock,
+			PackageManagerLocks:    helper.DefaultPackageManagerLocks,
+			PackageManagerPIDLocks: helper.DefaultPackageManagerPIDLocks,
 			// An orderly reboot, with no delay (v1 spec §9).
 			Reboot: func(ctx context.Context) error {
 				_, err := run(ctx, "systemctl", "reboot")

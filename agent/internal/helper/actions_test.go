@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -34,11 +36,12 @@ func newRunner(t *testing.T, dir string) *testRunner {
 	locks := t.TempDir()
 	r := &testRunner{journal: &bytes.Buffer{}}
 	r.ActionRunner = &ActionRunner{
-		Log:                 ActionLog{Dir: dir, Now: func() time.Time { return time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC) }},
-		Journal:             slog.New(slog.NewTextHandler(r.journal, nil)),
-		Uptime:              func() (time.Duration, error) { return time.Hour, nil },
-		PackageTaskLock:     filepath.Join(locks, "package-task.lock"),
-		PackageManagerLocks: []string{filepath.Join(locks, "lock-frontend"), filepath.Join(locks, ".rpm.lock")},
+		Log:                    ActionLog{Dir: dir, Now: func() time.Time { return time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC) }},
+		Journal:                slog.New(slog.NewTextHandler(r.journal, nil)),
+		Uptime:                 func() (time.Duration, error) { return time.Hour, nil },
+		PackageTaskLock:        filepath.Join(locks, "package-task.lock"),
+		PackageManagerLocks:    []string{filepath.Join(locks, "lock-frontend"), filepath.Join(locks, ".rpm.lock")},
+		PackageManagerPIDLocks: []string{filepath.Join(locks, "metadata_lock.pid")},
 		Reboot: func(context.Context) error {
 			r.reboots++
 			return nil
@@ -411,5 +414,39 @@ func TestAnyUserNameIsLoggedAndCut(t *testing.T) {
 	entries := logEntries(t, dir)
 	if entries[0]["user"] != "" || entries[1]["user"] != strings.Repeat("é", 256) {
 		t.Errorf("users = %q, %q", entries[0]["user"], entries[1]["user"])
+	}
+}
+
+// dnf 4 marks its locks with its process ID in a file, and deletes the file
+// when it is done.
+func TestRebootIsRefusedWhileADnf4LockNamesARunningProcess(t *testing.T) {
+	r := newRunner(t, t.TempDir())
+	path := r.PackageManagerPIDLocks[0]
+	finished := exec.Command("true")
+	if err := finished.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, test := range []struct {
+		content string
+		busy    bool
+	}{
+		{strconv.Itoa(os.Getpid()), true},
+		{strconv.Itoa(finished.Process.Pid), false}, // left behind by a crash
+		{"", false},
+	} {
+		if err := os.WriteFile(path, []byte(test.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ack, run, err := r.Request(rebootEnabled, rebootRequest(fmt.Sprintf("00000000-0000-4000-8000-%012d", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if busy := ack.Reason != nil && *ack.Reason == protocol.ReasonBusy; busy != test.busy {
+			t.Errorf("PID file %q: ack = %+v, want busy %v", test.content, ack, test.busy)
+		}
+		if run != nil {
+			run(context.Background())
+		}
 	}
 }

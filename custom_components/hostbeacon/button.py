@@ -9,6 +9,7 @@ from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
 from homeassistant.const import EVENT_LOGBOOK_ENTRY, EntityCategory
 from homeassistant.core import Context, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -33,19 +34,27 @@ REFUSAL_MESSAGES = {
 async def async_setup_entry(
     hass: HomeAssistant, entry: HostbeaconConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    """Add the Reboot button once the Host reports that Reboot is enabled."""
+    """Show the Reboot button only while the Host reports that Reboot is enabled."""
     connection = entry.runtime_data
     added = False
 
     @callback
-    def add_button() -> None:
+    def update_button() -> None:
         nonlocal added
-        if not added and "reboot" in connection.enabled_actions:
+        enabled = "reboot" in connection.enabled_actions
+        if enabled and not added:
             added = True
             async_add_entities([RebootButton(entry, connection)])
+        # Only a connected Agent says that Reboot is off: before it connects,
+        # Home Assistant does not know.
+        elif not enabled and connection.online:
+            added = False
+            registry = er.async_get(hass)
+            if entity_id := registry.async_get_entity_id("button", DOMAIN, f"{entry.unique_id}_reboot"):
+                registry.async_remove(entity_id)
 
-    add_button()
-    entry.async_on_unload(connection.add_listener(add_button))
+    update_button()
+    entry.async_on_unload(connection.add_listener(update_button))
 
 
 class RebootButton(HostEntity, ButtonEntity):

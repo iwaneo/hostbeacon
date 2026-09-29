@@ -37,6 +37,15 @@ var DefaultPackageManagerLocks = []string{
 	"/run/dnf/rpmtransaction.lock",
 }
 
+// DefaultPackageManagerPIDLocks are the locks of dnf 4 (AlmaLinux, Rocky,
+// RHEL 9). dnf 4 writes its process ID into the file and deletes the file
+// when it is done.
+var DefaultPackageManagerPIDLocks = []string{
+	"/var/cache/dnf/metadata_lock.pid",
+	"/var/cache/dnf/download_lock.pid",
+	"/var/lib/dnf/rpmdb_lock.pid",
+}
+
 // minUptime: no Reboot within 10 minutes of boot (v1 spec §9).
 const minUptime = 10 * time.Minute
 
@@ -69,7 +78,9 @@ type ActionRunner struct {
 	Uptime              func() (time.Duration, error)
 	PackageTaskLock     string
 	PackageManagerLocks []string
-	Reboot              func(ctx context.Context) error
+	// PackageManagerPIDLocks are held while they name a running process.
+	PackageManagerPIDLocks []string
+	Reboot                 func(ctx context.Context) error
 
 	// mu makes the Action ID check and the log write one step.
 	mu sync.Mutex
@@ -152,7 +163,7 @@ func (r *ActionRunner) guard(cfg config.Config, request ActionRequest) (reason p
 		r.Journal.Info("Reboot refused: a package task holds the package-task lock", "error", err)
 		return protocol.ReasonBusy, nil, nil
 	}
-	if held, err := anyLockHeld(r.PackageManagerLocks); held || err != nil {
+	if held, err := anyLockHeld(r.PackageManagerLocks); held || err != nil || anyPIDLockHeld(r.PackageManagerPIDLocks) {
 		r.Journal.Info("Reboot refused: the package manager is busy", "lock", held, "error", err)
 		release()
 		return protocol.ReasonBusy, nil, nil
@@ -231,6 +242,26 @@ func anyLockHeld(paths []string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// anyPIDLockHeld says whether one of paths holds the process ID of a running
+// process. A file left behind by a process that ended is not held.
+func anyPIDLockHeld(paths []string) bool {
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil || pid <= 0 {
+			continue
+		}
+		// Signal 0 only checks that the process exists.
+		if err := syscall.Kill(pid, 0); err == nil || errors.Is(err, syscall.EPERM) {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadUptime reads how long the Host (or the container) has been up.

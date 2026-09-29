@@ -52,6 +52,33 @@ async def test_no_button_when_reboot_is_not_enabled(hass: HomeAssistant, agent: 
     assert reboot_button(hass, entry) is None
 
 
+async def test_button_goes_when_reboot_is_turned_off_and_comes_back(hass: HomeAssistant, agent: FakeAgent) -> None:
+    entry, _ = await add_rebootable_host(hass, agent)
+
+    agent.enabled_actions = []
+    await agent.send_groups(protocol.Groups(agent=agent._agent_info()))
+    await wait_for(lambda: reboot_button(hass, entry) is None)
+
+    agent.enabled_actions = ["reboot"]
+    await agent.send_groups(protocol.Groups(agent=agent._agent_info()))
+    await wait_for(lambda: reboot_button(hass, entry) is not None)
+    await hass.async_block_till_done()
+    assert hass.states.get(reboot_button(hass, entry)).state != STATE_UNAVAILABLE
+
+
+async def test_button_stays_while_home_assistant_waits_for_the_agent(
+    hass: HomeAssistant, agent: FakeAgent
+) -> None:
+    """After a restart, Home Assistant does not know the enabled Actions yet."""
+    entry, button = await add_rebootable_host(hass, agent)
+    await agent.stop()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert reboot_button(hass, entry) == button
+
+
 async def test_button_is_a_config_restart_button(hass: HomeAssistant, agent: FakeAgent) -> None:
     _, button = await add_rebootable_host(hass, agent)
     registry_entry = er.async_get(hass).async_get(button)
