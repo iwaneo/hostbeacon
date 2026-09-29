@@ -152,7 +152,7 @@ class UpdatesEntity(HostEntity, UpdateEntity):
             return texts[f"{prefix}release_notes_{key}.message"].format(**placeholders)
 
         if not self._supported:
-            return text("not_supported", host=self._host_name())
+            return text("not_supported", host=self._entry_title)
         groups = self._connection.groups
         parts = [_package_table(text, self._connection)]
         if (manual := _needs_manual_update(text, self._connection)) is not None:
@@ -166,7 +166,7 @@ class UpdatesEntity(HostEntity, UpdateEntity):
         else:
             parts.append(text("list_never"))
         if "update_run" not in self._connection.enabled_actions:
-            parts.append(text("update_run_off", host=self._host_name()))
+            parts.append(text("update_run_off", host=self._entry_title))
         return "\n\n".join(parts)
 
 
@@ -188,14 +188,14 @@ def _package_table(text: Text, connection: HostConnection) -> str:
 
 
 def _needs_manual_update(text: Text, connection: HostConnection) -> str | None:
-    """The box of the last run that stopped before it installed anything, with its packages."""
+    """The packages of the last run that stopped at its checks, until a later run passes them."""
     run = connection.last_run
-    if run is None or run.result != "needs_manual_update":
+    if run is None or not run.needs_manual_update.count:
         return None
     names = ", ".join(f"`{name}`" for name in run.needs_manual_update.names)
     if (more := (run.needs_manual_update.count or 0) - len(run.needs_manual_update.names)) > 0:
         names += " " + text("more", count=more)
-    return text("needs_manual_update", error=run.error or "", packages=names or "-")
+    return text("needs_manual_update", packages=names or "-")
 
 
 def _age(when: datetime) -> str:

@@ -20,7 +20,7 @@ Conf linux-image-cloud-amd64 (6.12.111-1 Debian-Security:13/stable-security [amd
 func TestParseAptSimulationReadsInstallsAndRemovals(t *testing.T) {
 	plan := parseAptSimulation(aptSimulation)
 	want := []planned{
-		{Name: "linux-image-6.12.111+deb13-cloud-amd64", Arch: "amd64", Version: "6.12.111-1"},
+		{Name: "linux-image-6.12.111+deb13-cloud-amd64", Arch: "amd64", Version: "6.12.111-1", New: true},
 		{Name: "linux-image-cloud-amd64", Arch: "amd64", Version: "6.12.111-1"},
 		{Name: "tzdata", Arch: "all", Version: "1:2026c-0+deb13u1"},
 		{Name: "libc6", Arch: "i386", Version: "2.41-12+deb13u1"},
@@ -37,6 +37,17 @@ func TestParseAptSimulationReadsInstallsAndRemovals(t *testing.T) {
 		"tzdata:all=1:2026c-0+deb13u1", "libc6:i386=2.41-12+deb13u1",
 	}) {
 		t.Errorf("install args %q", args)
+	}
+}
+
+func TestAptAutoMarksKeepAutoremoveWorking(t *testing.T) {
+	installs := parseAptSimulation(aptSimulation).Installs
+	// The kernel meta package was installed by hand; tzdata and the
+	// foreign libc6 came as dependencies. The new kernel is new.
+	got := aptAutoMarks(installs, "tzdata\nlibc6:i386\nunrelated\n")
+	want := []string{"linux-image-6.12.111+deb13-cloud-amd64:amd64", "tzdata:all", "libc6:i386"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("marks %q, want %q", got, want)
 	}
 }
 

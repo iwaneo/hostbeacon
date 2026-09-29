@@ -194,9 +194,8 @@ func updateRun(args []string) error {
 		"DEBIAN_FRONTEND=noninteractive", "APT_LISTCHANGES_FRONTEND=none"}
 	run := helper.UpdateRun{
 		Manager: helper.DetectPackageManager("/"),
-		// The refresh and the simulation stop after an hour; the install
-		// is never stopped.
-		Run:                    command.ExecFor(env, time.Hour),
+		// Never stopped, however long (v1 spec §8).
+		Run:                    command.ExecFor(env, 0),
 		Stream:                 command.ExecStream(env),
 		Root:                   "/",
 		Record:                 helper.DefaultUpdateRunRecord,

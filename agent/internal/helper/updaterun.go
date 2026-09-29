@@ -69,8 +69,8 @@ type UpdateRunRecord struct {
 	Installed  *int64   `json:"installed"`
 	Remaining  *int64   `json:"remaining"`
 	Error      *string  `json:"error"`
-	// NeedsManualUpdate names the packages of a run that stopped before it
-	// installed anything.
+	// NeedsManualUpdate names the packages of the last run that stopped at
+	// its checks. It stays until a later run passes them.
 	NeedsManualUpdate []string `json:"needs_manual_update"`
 	// Logged: the result is in the Action log.
 	Logged bool `json:"logged"`
@@ -254,6 +254,11 @@ func (u *UpdateRun) Start(ctx context.Context, cfg config.Config) error {
 		StartedAt:         u.Now().UTC().Format(time.RFC3339),
 		NeedsManualUpdate: []string{},
 	}
+	// "Needs manual update" stays until a run passes its checks (v1 spec
+	// §7.7), also when this run fails before them.
+	if previous, err := ReadUpdateRun(u.Record); err == nil && previous != nil {
+		record.NeedsManualUpdate = previous.NeedsManualUpdate
+	}
 	if err := writeUpdateRun(u.Record, record); err != nil {
 		return err
 	}
@@ -302,6 +307,7 @@ func (u *UpdateRun) run(ctx context.Context, record *UpdateRunRecord) {
 		u.finish(record, ResultNeedsManualUpdate, "The Update run would remove packages, so nothing was installed.", plan.Removes)
 		return
 	}
+	record.NeedsManualUpdate = []string{}
 	// 4. Install exactly the approved transaction.
 	installed := int64(len(plan.Installs))
 	var installErr error
@@ -358,13 +364,17 @@ func (u *UpdateRun) waitFor(ctx context.Context, limit time.Duration, done func(
 	}
 }
 
-// finish stores the result in the record and the Action log.
+// finish stores the result in the record and the Action log. A run that
+// needs a manual update names its packages; any other keeps the names the
+// record has.
 func (u *UpdateRun) finish(record *UpdateRunRecord, result, message string, needsManualUpdate []string) {
 	record.State = RunFinished
 	record.FinishedAt = ptr(u.Now().UTC().Format(time.RFC3339))
 	record.Result = &result
 	record.Percent = nil
-	record.NeedsManualUpdate = append([]string{}, needsManualUpdate...)
+	if result == ResultNeedsManualUpdate {
+		record.NeedsManualUpdate = append([]string{}, needsManualUpdate...)
+	}
 	if message != "" {
 		record.Error = ptr(shorten(message))
 	}
@@ -489,17 +499,30 @@ func (a aptRun) releaseChanges(ctx context.Context, plan transaction) (bool, err
 // --trivial-only, apt refuses to install anything more than those, and
 // --no-remove refuses any removal: a changed plan stops the run.
 func (a aptRun) install(ctx context.Context, plan transaction, progress func(float64)) error {
+	auto, err := a.Run(ctx, "apt-mark", "showauto")
+	if err != nil {
+		return fmt.Errorf("cannot read which packages are automatically installed: %w", withStderr(err))
+	}
 	args := append([]string{
 		"install", "-q", "--trivial-only", "--no-remove",
 		"-o", "APT::Status-Fd=1",
 		// Keep the Host's current config files.
 		"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
 	}, aptInstallArgs(plan.Installs)...)
-	return withStderr(a.Stream(ctx, func(line string) {
+	if err := a.Stream(ctx, func(line string) {
 		if percent, ok := aptProgress(line); ok {
 			progress(percent)
 		}
-	}, "apt-get", args...))
+	}, "apt-get", args...); err != nil {
+		return withStderr(err)
+	}
+	if marks := aptAutoMarks(plan.Installs, string(auto)); len(marks) > 0 {
+		// The packages are installed; a failed mark only keeps them from autoremove.
+		if _, err := a.Run(ctx, "apt-mark", append([]string{"auto"}, marks...)...); err != nil {
+			fmt.Fprintln(os.Stderr, "cannot mark packages as automatically installed:", withStderr(err))
+		}
+	}
+	return nil
 }
 
 // aptProgress reads a status line like "pmstatus:tzdata:43.4783:Installing tzdata".

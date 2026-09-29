@@ -310,7 +310,7 @@
       "message": "+{count} more"
     },
     "release_notes_needs_manual_update": {
-      "message": "**Needs manual update:** {error}\n\nPackages: {packages}\n\nOn the Host, run `sudo apt full-upgrade` (Debian, Ubuntu) or `sudo dnf upgrade` (Fedora, RHEL), and check what it would change before you accept."
+      "message": "**Needs manual update:** an Update run stopped before it installed anything, because it would remove packages or move the Host to another distro release.\n\nPackages: {packages}\n\nOn the Host, run `sudo apt full-upgrade` (Debian, Ubuntu) or `sudo dnf upgrade` (Fedora, RHEL), and check what it would change before you accept."
     },
     "release_notes_reboot_required_yes": {
       "message": "**Reboot required:** Yes"

@@ -50,8 +50,9 @@ var DefaultPackageManagerPIDLocks = []string{
 const minUptime = 10 * time.Minute
 
 // updateRunStartTimeout limits how long the helper waits for the Update run
-// unit to take the package-task lock.
-const updateRunStartTimeout = 90 * time.Second
+// unit to take the package-task lock. Home Assistant waits 30 seconds for
+// the answer.
+const updateRunStartTimeout = 25 * time.Second
 
 const maxUser = 256
 

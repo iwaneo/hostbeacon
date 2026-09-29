@@ -306,6 +306,7 @@ func TestAptUpdateRunInstallsExactlyTheApprovedPackages(t *testing.T) {
 	u := newUpdateRun(t, "apt")
 	u.host.outputs["apt-get -s"] = aptPlan
 	u.host.outputs["apt list --upgradable"] = "Listing...\nheld/stable 2 amd64 [upgradable from: 1]\n"
+	u.host.outputs["apt-mark showauto"] = "libfoo1\nother\n"
 	u.host.streamLines = []string{"dlstatus:1:10:Retrieving", "pmstatus:libfoo1:12.5:Unpacking libfoo1", "pmstatus:foo-tool:87.2:Configuring foo-tool"}
 
 	if err := u.Start(context.Background(), updateRunEnabled); err != nil {
@@ -314,7 +315,10 @@ func TestAptUpdateRunInstallsExactlyTheApprovedPackages(t *testing.T) {
 	want := []string{
 		"apt-get update -q -o APT::Update::Error-Mode=any",
 		"apt-get -s -q dist-upgrade",
+		"apt-mark showauto",
 		"apt-get install -q --trivial-only --no-remove -o APT::Status-Fd=1 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold libfoo1:amd64=1.0-2 foo-tool:all=2:3.2",
+		// Naming a package makes it manually installed; libfoo1 was not.
+		"apt-mark auto libfoo1:amd64",
 		"apt list --upgradable -o APT::Cmd::Disable-Script-Warning=true",
 	}
 	if !slices.Equal(u.host.commands, want) {
@@ -390,6 +394,30 @@ func TestUpdateRunStopsWhenAPackageIndexIsForTheNextRelease(t *testing.T) {
 	wantRun(t, record, ResultNeedsManualUpdate, nil, nil)
 	if !slices.Equal(record.NeedsManualUpdate, []string{"libfoo1", "foo-tool"}) {
 		t.Errorf("needs manual update %q", record.NeedsManualUpdate)
+	}
+}
+
+func TestNeedsManualUpdateStaysUntilARunPassesItsChecks(t *testing.T) {
+	u := newUpdateRun(t, "apt")
+	writeUpdateRun(u.Record, &UpdateRunRecord{ActionID: secondID, RunID: secondID, State: RunFinished, StartedAt: "2026-09-28T12:00:00Z",
+		Result: ptr(ResultNeedsManualUpdate), NeedsManualUpdate: []string{"oldlib1"}, Logged: true})
+	u.host.fail["apt-get update"] = errors.New("exit status 100")
+
+	// Failed before its checks: the names stay.
+	u.Start(context.Background(), updateRunEnabled)
+	if record := u.record(t); *record.Result != ResultFailed || !slices.Equal(record.NeedsManualUpdate, []string{"oldlib1"}) {
+		t.Fatalf("after a failed refresh: result %s, names %q", *record.Result, record.NeedsManualUpdate)
+	}
+
+	// Passed its checks: the names go, even though the install fails.
+	delete(u.host.fail, "apt-get update")
+	u.host.outputs["apt-get -s"] = aptPlan
+	u.host.fail["apt-get install"] = errors.New("exit status 100")
+	u.request(t, secondID)
+	u.Log.write(logEntry{Entry: "request", ActionID: secondID, Action: protocol.ActionUpdateRun, Status: "accepted"})
+	u.Start(context.Background(), updateRunEnabled)
+	if record := u.record(t); *record.Result != ResultFailed || len(record.NeedsManualUpdate) != 0 {
+		t.Fatalf("after passing the checks: result %s, names %q", *record.Result, record.NeedsManualUpdate)
 	}
 }
 

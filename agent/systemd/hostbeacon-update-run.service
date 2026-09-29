@@ -20,4 +20,5 @@ StateDirectory=hostbeacon-helper
 StateDirectoryMode=0755
 CacheDirectory=hostbeacon-helper
 CacheDirectoryMode=0700
-TimeoutStartSec=90s
+# Shorter than Home Assistant waits for the answer.
+TimeoutStartSec=20s

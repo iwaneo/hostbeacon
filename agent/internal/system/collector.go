@@ -168,7 +168,9 @@ func NewCollector(host *Host, intervals Intervals, agent protocol.AgentInfo) *Co
 func (c *Collector) Sample(ctx context.Context) protocol.Groups {
 	groups := protocol.Groups{Agent: c.agentGroup(), System: ptr(c.system.Sample()), Flags: c.flags(ctx), UpdateRun: c.updateRun()}
 	if groups.UpdateRun != nil {
+		c.runMu.Lock()
 		c.runFinished = groups.UpdateRun.FinishedAt
+		c.runMu.Unlock()
 	}
 	if c.host.has(CapabilityDisks) {
 		groups.Disks = ptr(c.disks.Sample())

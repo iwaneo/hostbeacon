@@ -172,7 +172,7 @@ async def test_needs_manual_update_is_an_install_error_and_a_repair_without_name
 
     # The names and the command are in the release notes only.
     notes = await release_notes(hass, hass_ws_client, entry)
-    assert "**Needs manual update:** The Update run would remove packages" in notes
+    assert "**Needs manual update:** an Update run stopped before it installed anything" in notes
     assert "`hostbeacon-test-removed1`, `hostbeacon-test-removed2`" in notes
     assert "`sudo apt full-upgrade`" in notes
 
@@ -188,7 +188,13 @@ async def test_needs_manual_update_repair_stays_during_a_new_run_and_clears_afte
     await wait_for(lambda: state(hass, entry, "host_status") == "updating")
     assert issue(hass, "needs_manual_update", entry) is not None
 
-    await agent.send_update_run(finished("ok", run_id=OTHER_RUN_ID, installed=2, remaining=0))
+    # Failed before its checks: the Agent keeps the names, so the repair stays.
+    kept = protocol.NameList(count=2, names=MANUAL_NAMES)
+    await agent.send_update_run(finished("failed", run_id=OTHER_RUN_ID, error="Cannot refresh", needs_manual_update=kept))
+    await wait_for(lambda: state(hass, entry, "last_update_run") == "failed")
+    assert issue(hass, "needs_manual_update", entry) is not None
+
+    await agent.send_update_run(finished("ok", run_id=RUN_ID, installed=2, remaining=0))
     await wait_for(lambda: issue(hass, "needs_manual_update", entry) is None)
 
 

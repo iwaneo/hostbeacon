@@ -180,13 +180,13 @@ def _track_update_repairs(hass: HomeAssistant, entry: HostbeaconConfigEntry, con
                 command=flags.package_system_fix_command or "",
             )
 
-        # Removed when a later run passes its test step, or no Available
-        # updates are left.
+        # The Agent keeps the names until a later run passes its checks.
+        # Removed then, or when no Available updates are left.
         last, updates = connection.last_run, connection.groups.available_updates
         show(
             "needs_manual_update",
             last is not None
-            and last.result == "needs_manual_update"
+            and bool(last.needs_manual_update.count)
             and not (updates is not None and updates.count == 0),
             ir.IssueSeverity.WARNING,
         )

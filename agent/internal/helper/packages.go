@@ -9,9 +9,11 @@ import (
 )
 
 // planned is one package an Update run installs: its name, architecture,
-// and full new version (with epoch and release).
+// and full new version (with epoch and release). New: it is not installed
+// yet (apt only).
 type planned struct {
 	Name, Arch, Version string
+	New                 bool
 }
 
 // transaction is what the Update run's checks approved (v1 spec §8).
@@ -44,7 +46,9 @@ func parseAptSimulation(out string) transaction {
 			if !found || open < 0 || end < open || len(version) == 0 {
 				continue
 			}
-			plan.Installs = append(plan.Installs, planned{Name: name, Arch: details[open+1 : end], Version: version[0]})
+			// An upgrade shows the installed version next: "[2026b]".
+			upgrade := len(fields) > 2 && strings.HasPrefix(fields[2], "[")
+			plan.Installs = append(plan.Installs, planned{Name: name, Arch: details[open+1 : end], Version: version[0], New: !upgrade})
 		}
 	}
 	return plan
@@ -144,6 +148,26 @@ func dnfReleaseChanges(owners, installs []planned) bool {
 func major(version string) string {
 	before, _, _ := strings.Cut(version, ".")
 	return before
+}
+
+// aptAutoMarks lists the approved packages to mark as automatically
+// installed after the install: apt marks every package named on its command
+// line as manually installed, so autoremove would never remove them. Those
+// that were automatically installed before, and the new ones (dependencies
+// of the upgrades, like a new kernel), are marked again. auto is the output
+// of apt-mark showauto.
+func aptAutoMarks(installs []planned, auto string) []string {
+	wasAuto := map[string]bool{}
+	for line := range strings.Lines(auto) {
+		wasAuto[strings.TrimSpace(line)] = true
+	}
+	var marks []string
+	for _, item := range installs {
+		if item.New || wasAuto[item.Name] || wasAuto[item.Name+":"+item.Arch] {
+			marks = append(marks, item.Name+":"+item.Arch)
+		}
+	}
+	return marks
 }
 
 // countAptUpgradable counts the lines of apt list --upgradable.
