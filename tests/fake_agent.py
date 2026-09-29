@@ -57,6 +57,11 @@ class FakeAgent:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.instance_id = str(uuid.uuid4())
+        # A new run ID at each Agent start; a copy has its own.
+        self.run_id = str(uuid.uuid4())
+        self.copied_from: list[str] = []
+        # The host_id of every hello reply.
+        self.host_ids: list[str | None] = []
         self.hostname = "test-host"
         self.system = system()
         self.capabilities: list[str] = []
@@ -105,6 +110,12 @@ class FakeAgent:
         self._ssl = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self._ssl.minimum_version = ssl.TLSVersion.TLSv1_3
         self._ssl.load_cert_chain(cert_path, key_path)
+
+    def reinstall(self) -> None:
+        """Forget the identity and every Pairing, as a reinstall would."""
+        self.instance_id = str(uuid.uuid4())
+        self.keys = set()
+        self.new_certificate()
 
     def share_identity(self, other: FakeAgent) -> None:
         """Take the instance ID and certificate of other, as a copy of it would."""
@@ -177,6 +188,7 @@ class FakeAgent:
             {
                 "instance_id": self.instance_id,
                 "hostname": self.hostname,
+                "copied_from": self.copied_from,
                 "key": base64.b64encode(new_key).decode(),
                 "proof": base64.b64encode(agent_proof(key, self.fingerprint, nonce, new_key)).decode(),
             }
@@ -200,8 +212,8 @@ class FakeAgent:
                 protocol_version=protocol.PROTOCOL_VERSION,
                 protocol_majors=protocol.PROTOCOL_MAJORS,
                 instance_id=self.instance_id,
-                run_id=str(uuid.uuid4()),
-                copied_from=[],
+                run_id=self.run_id,
+                copied_from=self.copied_from,
                 hostname=self.hostname,
                 agent_version="0.1.0",
                 newest_agent_version=None,
@@ -214,8 +226,9 @@ class FakeAgent:
             )
             await socket.send_str(protocol.encode(hello))
             reply = await asyncio.wait_for(socket.receive(), 5)
-            if reply.type != WSMsgType.TEXT or not isinstance(protocol.decode(reply.data), protocol.HelloReply):
+            if reply.type != WSMsgType.TEXT or not isinstance(answer := protocol.decode(reply.data), protocol.HelloReply):
                 return socket
+            self.host_ids.append(answer.host_id)
             await socket.send_str(protocol.encode(self._snapshot()))
             async for frame in socket:
                 if frame.type != WSMsgType.TEXT:

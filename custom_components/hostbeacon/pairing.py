@@ -57,6 +57,8 @@ class Paired:
     hostname: str
     key: bytes
     fingerprint: bytes
+    # The IDs the Agent had before it found that it is a copy of another Host.
+    copied_from: list[str]
 
 
 def _clean(code: str) -> str:
@@ -149,10 +151,20 @@ async def pair(session: aiohttp.ClientSession, host: str, port: int, code: str, 
         new_key = base64.b64decode(answer["key"], validate=True)
         proof = base64.b64decode(answer["proof"], validate=True)
         instance_id, hostname = answer["instance_id"], answer["hostname"]
-    except (KeyError, TypeError, ValueError) as err:  # also JSONDecodeError
+        copied_from = answer.get("copied_from") or []
+    except (KeyError, TypeError, ValueError, AttributeError) as err:  # also JSONDecodeError
         raise PairingFailed("the Agent's answer is malformed") from err
-    if not (isinstance(instance_id, str) and UUID_PATTERN.fullmatch(instance_id) and isinstance(hostname, str) and hostname):
+    if not (
+        isinstance(instance_id, str)
+        and UUID_PATTERN.fullmatch(instance_id)
+        and isinstance(hostname, str)
+        and hostname
+        and isinstance(copied_from, list)
+        and all(isinstance(item, str) and UUID_PATTERN.fullmatch(item) for item in copied_from)
+    ):
         raise PairingFailed("the Agent's answer is malformed")
     if len(new_key) != SIZE or not hmac.compare_digest(proof, agent_proof(stretched, fingerprint, nonce, new_key)):
         raise PairingFailed("the Agent did not prove it knows the code")
-    return Paired(instance_id=instance_id, hostname=hostname, key=new_key, fingerprint=fingerprint)
+    return Paired(
+        instance_id=instance_id, hostname=hostname, key=new_key, fingerprint=fingerprint, copied_from=copied_from
+    )

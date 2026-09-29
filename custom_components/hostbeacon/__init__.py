@@ -12,6 +12,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.storage import Store
@@ -44,6 +45,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -
         entry.data[CONF_PORT],
         bytes.fromhex(entry.data[CONF_FINGERPRINT]),
         base64.b64decode(entry.data[CONF_KEY]),
+        host_id=entry.unique_id,
     )
     entry.runtime_data = connection
     device_registry = dr.async_get(hass)
@@ -72,10 +74,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -
         )
 
     entry.async_on_unload(connection.add_listener(update_device))
+    _track_certificate(hass, entry, connection)
     await _track_reboot(hass, entry, connection)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, connection.run(), f"hostbeacon connection {entry.title}")
     return True
+
+
+def _track_certificate(hass: HomeAssistant, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
+    """Raise the certificate repair while the Agent shows another certificate (v1 spec §7.7).
+
+    Its fix starts Re-pair. It is removed once the Host is connected again.
+    """
+    issue_id = f"certificate_changed_{entry.entry_id}"
+    raised: bool | None = None
+
+    @callback
+    def certificate_changed() -> None:
+        nonlocal raised
+        if connection.problem == "certificate" and raised is not True:
+            raised = True
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=True,
+                is_persistent=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="certificate_changed",
+                translation_placeholders={"host": entry.title},
+                data={"entry_id": entry.entry_id},
+            )
+        elif connection.online and raised is not False:
+            raised = False
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+    entry.async_on_unload(connection.add_listener(certificate_changed))
 
 
 def _store(hass: HomeAssistant, entry: ConfigEntry) -> Store[dict]:
@@ -134,6 +168,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) 
     command to run on the Host.
     """
     await _store(hass, entry).async_remove()
+    for kind in ("certificate_changed", "two_machines"):
+        ir.async_delete_issue(hass, DOMAIN, f"{kind}_{entry.entry_id}")
     key = base64.b64decode(entry.data[CONF_KEY])
     if await remove_pairing(
         async_get_clientsession(hass),

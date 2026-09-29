@@ -50,8 +50,11 @@ Answered only while a Pairing code is active (`hostbeacon pair`).
    The name is 1 to 64 printable characters (else 400).
 3. The Agent checks the proof against its own `fp`. Wrong: 403, and one of
    the 5 tries is used. No active code, expired, used, or cancelled: 403.
-4. Right: the code is used up. Answer: `{"instance_id", "hostname", "key": <32 random bytes>, "proof": <Agent proof>}`.
+4. Right: the code is used up. Answer: `{"instance_id", "hostname", "copied_from", "key": <32 random bytes>, "proof": <Agent proof>}`.
    Home Assistant checks the Agent proof before it saves anything.
+   `copied_from` is the same list as in `hello` (empty for most Hosts); Re-pair
+   uses it to warn that the machine is a copy. Readers treat a missing
+   `copied_from` as empty.
 
 Bytes are base64 (standard alphabet, with padding) in JSON. The code is read
 without dashes or spaces, in upper case (`K7QM4XPT9RWD`).
@@ -81,6 +84,9 @@ A WebSocket upgrade with `Authorization: Bearer <key in base64>`, on a
 connection pinned to `fp`. An unknown key gets 401. A Pairing with 4 open
 connections already gets 429. After login the Agent sends `hello`; Home
 Assistant answers; then the Agent sends a `snapshot` and `delta` messages.
+Since 1.1, the answer may carry `host_id`, the Host ID Home Assistant knows
+this Agent as. The Agent keeps it as a known ID, so that a copy of the Host
+can report it in `copied_from`.
 
 Per Pairing, the Agent allows 600 messages and 10 `action_request`s a minute
 (counted across reconnects while the Agent runs). Over a limit, it closes the
