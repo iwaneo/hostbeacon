@@ -163,9 +163,10 @@ class HomeAssistant:
     """A test Home Assistant in Docker with the Integration from this repo."""
 
     def __init__(self, directory: Path, image: str) -> None:
-        self.config = directory / "config"
-        self.config.mkdir()
-        (self.config / "configuration.yaml").write_text("default_config:\n\nlogger:\n  default: warning\n")
+        # Only this file is mounted: Home Assistant runs as root and keeps its
+        # own files inside the container, so none is left behind.
+        self.configuration = directory / "configuration.yaml"
+        self.configuration.write_text("default_config:\n\nlogger:\n  default: warning\n")
         self.image = image
         # On Linux, Home Assistant shares the host network, so it reaches the
         # Agents on 127.0.0.1. Docker Desktop reaches them through its host name.
@@ -181,7 +182,7 @@ class HomeAssistant:
         subprocess.run(
             [
                 "docker", "run", "-d", "--name", CONTAINER, *network,
-                "-v", f"{self.config}:/config",
+                "-v", f"{self.configuration}:/config/configuration.yaml:ro",
                 "-v", f"{REPO / 'custom_components/hostbeacon'}:/config/custom_components/hostbeacon:ro",
                 self.image,
             ],
