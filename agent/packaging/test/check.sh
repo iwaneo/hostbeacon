@@ -63,6 +63,12 @@ journalctl --no-pager -u hostbeacon | grep -q 'msg=listening' || fail "the Agent
 systemctl is-active --quiet hostbeacon-helper.service || fail "the root helper is not running"
 systemctl is-enabled --quiet hostbeacon-package-list-refresh.timer || fail "the package list refresh timer is not enabled"
 
+echo "-- no transparent huge pages (resource budget, v1 spec §4.6)"
+for unit in hostbeacon hostbeacon-helper; do
+	grep -q '^THP_enabled:[[:space:]]*0' "/proc/$(systemctl show --property MainPID --value "$unit")/status" ||
+		fail "$unit may use transparent huge pages"
+done
+
 echo "-- no Action is on"
 status=$(hostbeacon status)
 echo "$status"
