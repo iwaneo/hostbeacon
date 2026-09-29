@@ -144,6 +144,44 @@ func TestRepeatedUpdateRunIDIsRefusedAsDuplicate(t *testing.T) {
 	}
 }
 
+func TestNextLogWriteCatchesUpAnUnloggedRunResult(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := newUpdateRunner(t, dir)
+	r.UpdateRunRecord = filepath.Join(t.TempDir(), "update-run.json")
+	writeUpdateRun(r.UpdateRunRecord, &UpdateRunRecord{ActionID: secondID, RunID: secondID, State: RunFinished, StartedAt: "2026-09-29T11:00:00Z",
+		FinishedAt: ptr("2026-09-29T11:30:00Z"), Result: ptr(ResultOK), NeedsManualUpdate: []string{}})
+
+	r.Request(rebootEnabled, rebootRequest(firstID))
+	entries := logEntries(t, dir)
+	if last := entries[len(entries)-1]; last["entry"] != "result" || last["action_id"] != secondID || last["result"] != "ok" {
+		t.Fatalf("log %v, want the run result after the request", entries)
+	}
+	if record, _ := ReadUpdateRun(r.UpdateRunRecord); !record.Logged {
+		t.Error("the record is not marked logged")
+	}
+}
+
+func TestCopyResetsTheUpdateRunRecordUnlessARunGoesOn(t *testing.T) {
+	r, unit := newUpdateRunner(t, t.TempDir())
+	r.UpdateRunRecord = filepath.Join(t.TempDir(), "update-run.json")
+	writeUpdateRun(r.UpdateRunRecord, &UpdateRunRecord{ActionID: secondID, RunID: secondID, State: RunFinished, StartedAt: "2026-09-29T11:00:00Z", NeedsManualUpdate: []string{}})
+
+	unit.active = true
+	if err := r.ResetUpdateRun(); err != nil {
+		t.Fatal(err)
+	}
+	if record, _ := ReadUpdateRun(r.UpdateRunRecord); record == nil {
+		t.Fatal("removed the record of a run that goes on")
+	}
+	unit.active = false
+	if err := r.ResetUpdateRun(); err != nil {
+		t.Fatal(err)
+	}
+	if record, _ := ReadUpdateRun(r.UpdateRunRecord); record != nil {
+		t.Fatalf("record %+v, want no run yet", record)
+	}
+}
+
 // --- The unit's side: the steps of the run ---
 
 type fakeHost struct {
@@ -604,8 +642,15 @@ func newDnfRun(t *testing.T) *testUpdateRun {
 			for _, name := range []string{"kernel-core.rpm", "python3-urllib3.rpm"} {
 				writeFile(t, filepath.Join(u.Downloads, name), "rpm")
 			}
+		case strings.HasPrefix(line, "rpm -qp --queryformat %{NAME}:"):
+			return "kernel-core:\npython3-urllib3:\n", nil, true
 		case strings.HasPrefix(line, "rpm -qp"):
 			return headers, nil, true
+		case strings.HasPrefix(line, "rpm -q --queryformat"):
+			// kernel-core has another version installed; python3-urllib3 is new.
+			return "kernel-core\npackage python3-urllib3 is not installed\n", exec.Command("false").Run(), true
+		case line == "dnf --version":
+			return "dnf5 version 5.4.6.0\n", nil, true
 		case strings.HasPrefix(line, "rpm -qf"):
 			return "fedora-release-identity-cloud 44\n", nil, true
 		case strings.HasPrefix(line, "rpm -K"):
@@ -631,7 +676,12 @@ func TestDnfUpdateRunInstallsOnlyTheDownloadedPackages(t *testing.T) {
 		"rpm -qf --queryformat %{NAME} %{VERSION}\n " + filepath.Join(u.Root, "usr", "lib", "os-release"),
 		"rpm -qp --queryformat " + rpmHeaderFormat + " " + files,
 		"rpm -K " + files,
+		"rpm -q --queryformat %{NAME}\n python3-urllib3 kernel-core",
+		"rpm -qp --queryformat %{NAME}:[%{OBSOLETENAME} ]\n " + files,
 		"dnf install -y -q --disablerepo=* " + files,
+		"dnf --version",
+		// Named on the command line, dnf would keep the new package forever.
+		"dnf mark dependency python3-urllib3",
 		"dnf --cacheonly -q repoquery --upgrades --latest-limit=1 --queryformat %{name} %{arch}\n",
 	}
 	// The root in the test may be under a symlink (macOS /var).

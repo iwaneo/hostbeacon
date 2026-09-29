@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -610,8 +611,51 @@ func (d dnfRun) install(ctx context.Context, plan transaction, _ func(float64)) 
 			return errors.New("a package is not signed: " + strings.TrimSpace(line))
 		}
 	}
+	marks := d.dependencyMarks(ctx, plan)
 	args := append([]string{"install", "-y", "-q", "--disablerepo=*"}, plan.Files...)
-	return withStderr(d.Stream(ctx, func(string) {}, "dnf", args...))
+	if err := d.Stream(ctx, func(string) {}, "dnf", args...); err != nil {
+		return withStderr(err)
+	}
+	if len(marks) > 0 {
+		// The packages are installed; a failed mark only keeps them from autoremove.
+		if _, err := d.Run(ctx, "dnf", append(markCommand(d.dnfVersion(ctx)), marks...)...); err != nil {
+			fmt.Fprintln(os.Stderr, "cannot mark packages as dependencies:", withStderr(err))
+		}
+	}
+	return nil
+}
+
+// dependencyMarks lists the new packages to mark as dependencies after the
+// install: dnf marks every file named on its command line as installed by
+// the user, so autoremove would never remove them. A package whose name is
+// already installed (an upgrade, or a new kernel next to the old one) keeps
+// the reason dnf gives it, and so does one that replaces another package,
+// since it takes over that package's place. When it cannot tell, it marks
+// nothing.
+func (d dnfRun) dependencyMarks(ctx context.Context, plan transaction) []string {
+	names := make([]string, 0, len(plan.Installs))
+	for _, item := range plan.Installs {
+		names = append(names, item.Name)
+	}
+	// rpm exits 1 when one of the names is not installed.
+	installedOut, err := d.Run(ctx, "rpm", append([]string{"-q", "--queryformat", "%{NAME}\n"}, names...)...)
+	var exit *exec.ExitError
+	if err != nil && !errors.As(err, &exit) {
+		return nil
+	}
+	obsoletesOut, err := d.Run(ctx, "rpm", append([]string{"-qp", "--queryformat", "%{NAME}:[%{OBSOLETENAME} ]\n"}, plan.Files...)...)
+	if err != nil {
+		return nil
+	}
+	return dnfDependencyMarks(string(installedOut), string(obsoletesOut))
+}
+
+// dnfVersion is 5 for dnf5, else 4.
+func (d dnfRun) dnfVersion(ctx context.Context) int {
+	if out, _ := d.Run(ctx, "dnf", "--version"); strings.Contains(string(out), "dnf5") {
+		return 5
+	}
+	return 4
 }
 
 func (d dnfRun) remaining(ctx context.Context) (int64, error) {

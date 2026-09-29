@@ -92,6 +92,8 @@ type ActionRunner struct {
 	// UpdateRuns starts the Update run unit. Without it, Update run is
 	// refused.
 	UpdateRuns UpdateRunStarter
+	// UpdateRunRecord is the Update run record.
+	UpdateRunRecord string
 
 	// mu makes the Action ID check and the log write one step.
 	mu sync.Mutex
@@ -134,6 +136,8 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 			release()
 		}
 		entry.Status, entry.Reason, first, release = "refused", protocol.ReasonCannotLog, nil, nil
+	} else {
+		r.endUpdateRun()
 	}
 	r.Journal.Info("Action request", "action_id", entry.ActionID, "action", entry.Action, "pairing", entry.Pairing,
 		"pairing_id", entry.PairingID, "user", *entry.User, "status", entry.Status, "reason", entry.Reason)
@@ -206,6 +210,42 @@ func (r *ActionRunner) startUpdateRun(request ActionRequest) protocol.RefusalRea
 		return protocol.ReasonBusy
 	}
 	return ""
+}
+
+// endUpdateRun writes the result of an ended Update run to the Action log
+// when the unit could not (v1 spec §11: at the helper's next successful
+// write), and marks a run that stopped without a result unknown.
+func (r *ActionRunner) endUpdateRun() {
+	if r.UpdateRunRecord == "" || r.UpdateRuns == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if active, err := r.UpdateRuns.Active(ctx); err != nil || active {
+		return
+	}
+	if err := EndUpdateRun(r.UpdateRunRecord, r.Log); err != nil {
+		r.Journal.Error("cannot complete the Update run record", "error", err)
+	}
+}
+
+// ResetUpdateRun makes the Update run record "no run yet", for a Host that
+// found it is a copy (v1 spec §4.4). A run that is going on keeps its record.
+func (r *ActionRunner) ResetUpdateRun() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.UpdateRunRecord == "" || r.UpdateRuns == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if active, err := r.UpdateRuns.Active(ctx); err != nil || active {
+		return err
+	}
+	if err := os.Remove(r.UpdateRunRecord); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (r *ActionRunner) guardReboot() (reason protocol.RefusalReason, release func()) {

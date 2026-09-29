@@ -123,6 +123,7 @@ func serve(args []string) error {
 			PackageManagerPIDLocks: helper.DefaultPackageManagerPIDLocks,
 			PackageManager:         helper.DetectPackageManager("/"),
 			UpdateRuns:             updateRuns,
+			UpdateRunRecord:        helper.DefaultUpdateRunRecord,
 			// An orderly reboot, with no delay (v1 spec §9).
 			Reboot: func(ctx context.Context) error {
 				_, err := run(ctx, "systemctl", "reboot")

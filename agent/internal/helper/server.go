@@ -184,6 +184,9 @@ func (s *Server) logIdentityCopy(conn net.Conn, copy *IdentityCopy) {
 		return
 	}
 	s.Log.Warn("the Agent found that this Host is a copy and made a new identity", "instance_id", copy.InstanceID, "copied_from", copy.CopiedFrom)
+	if err := s.Actions.ResetUpdateRun(); err != nil {
+		s.Log.Error("cannot reset the Update run record of the copy", "error", err)
+	}
 	writeReply(conn, reply{Result: json.RawMessage("{}")})
 }
 

@@ -170,6 +170,33 @@ func aptAutoMarks(installs []planned, auto string) []string {
 	return marks
 }
 
+// dnfDependencyMarks reads which approved packages to mark as
+// dependencies (see dnfRun.dependencyMarks). installed is rpm -q output: one
+// installed name per line. obsoletes has one "name:obsoleted names" line per
+// downloaded package.
+func dnfDependencyMarks(installed, obsoletes string) []string {
+	wasInstalled := map[string]bool{}
+	for line := range strings.Lines(installed) {
+		wasInstalled[strings.TrimSpace(line)] = true
+	}
+	var marks []string
+	for line := range strings.Lines(obsoletes) {
+		name, obsoleted, found := strings.Cut(strings.TrimSpace(line), ":")
+		if found && name != "" && !wasInstalled[name] && strings.TrimSpace(obsoleted) == "" && !slices.Contains(marks, name) {
+			marks = append(marks, name)
+		}
+	}
+	return marks
+}
+
+// markCommand is the dnf command that marks packages as dependencies.
+func markCommand(dnfVersion int) []string {
+	if dnfVersion == 5 {
+		return []string{"mark", "dependency"}
+	}
+	return []string{"mark", "remove"}
+}
+
 // countAptUpgradable counts the lines of apt list --upgradable.
 func countAptUpgradable(out string) int64 {
 	var count int64

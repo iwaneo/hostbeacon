@@ -51,6 +51,19 @@ func TestAptAutoMarksKeepAutoremoveWorking(t *testing.T) {
 	}
 }
 
+func TestDnfDependencyMarks(t *testing.T) {
+	installed := "kernel-core\nfoo\npackage libnew1 is not installed\npackage foo2 is not installed\n"
+	// kernel-core: a new kernel next to the installed one. foo: an upgrade.
+	// libnew1: a new dependency. foo2: new, but it replaces foo.
+	obsoletes := "kernel-core:\nfoo:\nlibnew1:\nfoo2:foo \n"
+	if got := dnfDependencyMarks(installed, obsoletes); !slices.Equal(got, []string{"libnew1"}) {
+		t.Fatalf("marks %q, want only the new dependency", got)
+	}
+	if !slices.Equal(markCommand(5), []string{"mark", "dependency"}) || !slices.Equal(markCommand(4), []string{"mark", "remove"}) {
+		t.Error("mark commands")
+	}
+}
+
 // writeRelease writes one package index's Release file in lists.
 func writeRelease(t *testing.T, lists, name, origin, codename string) {
 	t.Helper()
