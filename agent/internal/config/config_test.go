@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
@@ -139,5 +140,131 @@ func TestConfigThatCannotBeReadFailsClosed(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing.json")); err == nil {
 		t.Error("missing file: no error")
+	}
+}
+
+func TestVPNAddressIsAllowedBesideTheList(t *testing.T) {
+	c, err := load(t, `{"format": 1, "vpn_address": "100.101.102.103"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allows(c, "100.101.102.103") || !allows(c, "10.0.0.1") {
+		t.Error("the VPN address or a private address is refused")
+	}
+	if allows(c, "100.101.102.104") {
+		t.Error("another VPN address is allowed")
+	}
+	for _, bad := range []string{`"100.64.0.0/10"`, `"everyone"`, `5`} {
+		if _, err := load(t, `{"format": 1, "vpn_address": `+bad+`}`); err == nil {
+			t.Errorf("vpn_address %s: no error, want only a single address", bad)
+		}
+	}
+}
+
+func TestWriteSetupMakesALoadableConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hostbeacon", "config.json")
+	vpn := "100.101.102.103"
+	if err := WriteSetup(path, Setup{EnabledActions: []protocol.Action{protocol.ActionReboot}, VPNAddress: &vpn}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.EnabledActions, []protocol.Action{protocol.ActionReboot}) {
+		t.Errorf("enabled actions = %v, want reboot", c.EnabledActions)
+	}
+	if !allows(c, vpn) {
+		t.Error("the VPN address is refused")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("mode = %o, want 644: only root may change the config", info.Mode().Perm())
+	}
+}
+
+func TestWriteSetupKeepsWhatItDoesNotSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"format": 1, "port": 9000, "enabled_actions": ["reboot"], "vpn_address": "100.64.1.2", "later_field": {"a": 1}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No VPN address given: the old one stays.
+	if err := WriteSetup(path, Setup{EnabledActions: []protocol.Action{protocol.ActionUpdateRun}}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Port != 9000 || !allows(c, "100.64.1.2") {
+		t.Errorf("port = %d, VPN address allowed = %v: want both kept", c.Port, allows(c, "100.64.1.2"))
+	}
+	if !slices.Equal(c.EnabledActions, []protocol.Action{protocol.ActionUpdateRun}) {
+		t.Errorf("enabled actions = %v, want only update_run: an Action not named is off", c.EnabledActions)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"later_field"`) {
+		t.Errorf("a field from a later release was dropped:\n%s", data)
+	}
+
+	// An empty VPN address removes it.
+	empty := ""
+	if err := WriteSetup(path, Setup{VPNAddress: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if allows(c, "100.64.1.2") || len(c.EnabledActions) != 0 {
+		t.Errorf("VPN address allowed = %v, enabled actions = %v: want neither", allows(c, "100.64.1.2"), c.EnabledActions)
+	}
+}
+
+func TestWriteSetupRefusesWhatLoadWouldRefuse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"format": 1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"100.64.0.0/10", "not an address"} {
+		if err := WriteSetup(path, Setup{VPNAddress: &bad}); err == nil {
+			t.Errorf("VPN address %q: no error", bad)
+		}
+	}
+	if err := WriteSetup(path, Setup{EnabledActions: []protocol.Action{"shutdown"}}); err == nil {
+		t.Error("unknown Action: no error")
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != `{"format": 1}` {
+		t.Errorf("a refused setup changed the file:\n%s", data)
+	}
+}
+
+func TestWriteDefaultKeepsAnOwnerConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hostbeacon", "config.json")
+	created, err := WriteDefault(path)
+	if err != nil || !created {
+		t.Fatalf("created = %v, err = %v; want a new file", created, err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.EnabledActions) != 0 {
+		t.Errorf("enabled actions = %v, want none after install", c.EnabledActions)
+	}
+	if err := os.WriteFile(path, []byte(`{"format": 1, "port": 9000}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if created, err := WriteDefault(path); err != nil || created {
+		t.Fatalf("created = %v, err = %v; want the owner's file kept", created, err)
+	}
+	if c, _ := Load(path); c.Port != 9000 {
+		t.Error("the owner's config was replaced")
 	}
 }

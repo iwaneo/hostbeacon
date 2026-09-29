@@ -15,6 +15,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/iwaneo/hostbeacon/agent/internal/command"
+	"github.com/iwaneo/hostbeacon/agent/internal/config"
 	"github.com/iwaneo/hostbeacon/agent/internal/helper"
 	"github.com/iwaneo/hostbeacon/agent/internal/identity"
 	"github.com/iwaneo/hostbeacon/agent/internal/pairing"
@@ -27,8 +29,13 @@ type owner struct {
 	// signals reads the identity signals. Owner commands run as root, so
 	// they read the SMBIOS UUID themselves.
 	signals func() identity.Signals
-	// restart restarts the running Agent, so it uses the new identity.
+	// restart restarts the running Agent, so it uses the new identity or
+	// Host config.
 	restart func() error
+	// run runs a program, such as systemctl or firewall-cmd.
+	run command.Command
+	// tailscale says whether Tailscale is on this Host.
+	tailscale func() bool
 }
 
 func systemOwner() owner {
@@ -41,6 +48,12 @@ func systemOwner() owner {
 			return readSignals(ctx, "/", helper.HostJobs{Root: "/"}.ReadSMBIOSUUID)
 		},
 		restart: func() error { return exec.Command("systemctl", "try-restart", "hostbeacon.service").Run() },
+		run:     command.Exec([]string{"LANG=C", "LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}),
+		tailscale: func() bool {
+			_, err := exec.LookPath("tailscale")
+			_, statErr := os.Stat("/sys/class/net/tailscale0")
+			return err == nil || statErr == nil
+		},
 	}
 }
 
@@ -243,9 +256,30 @@ func regenerateKey(args []string, o owner) error {
 
 // status shows the Agent's identity and Pairings, and what to run.
 func status(args []string, o owner) error {
-	stateDir, _, err := ownerFlags("status", args, nil)
+	var configPath string
+	stateDir, _, err := ownerFlags("status", args, func(flags *flag.FlagSet) {
+		flags.StringVar(&configPath, "config", config.DefaultPath, "the Host config file")
+	})
 	if err != nil {
 		return err
+	}
+	running := "not running (see: sudo systemctl status hostbeacon)"
+	if out, err := o.run(context.Background(), "systemctl", "is-active", "hostbeacon.service"); err == nil && strings.TrimSpace(string(out)) == "active" {
+		running = "running"
+	}
+	fmt.Fprintf(o.out, "Agent:       %s\n", running)
+	if c, err := config.Load(configPath); err != nil {
+		fmt.Fprintf(o.out, "Host config: cannot read it, so the Agent accepts no connections: %v\n", err)
+	} else {
+		actions := actionList(c.EnabledActions)
+		if actions == "" {
+			actions = "none (turn them on with: sudo hostbeacon setup)"
+		}
+		fmt.Fprintf(o.out, "Actions:     %s\n", actions)
+		fmt.Fprintf(o.out, "Port:        %d\n", c.Port)
+		if c.VPNAddress.IsValid() {
+			fmt.Fprintf(o.out, "VPN address: %s\n", c.VPNAddress)
+		}
 	}
 	id, err := identity.ReadStatus(stateDir)
 	if err != nil {

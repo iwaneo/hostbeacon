@@ -12,9 +12,9 @@ After=network-online.target
 # "accepted" only then.
 Type=notify
 NotifyAccess=main
-ExecStart=/usr/local/bin/hostbeacon-helper update-run
+ExecStart=/usr/bin/hostbeacon-helper update-run
 # Also after a crash: a run without a result is marked result unknown.
-ExecStopPost=/usr/local/bin/hostbeacon-helper update-run-ended
+ExecStopPost=/usr/bin/hostbeacon-helper update-run-ended
 # The run record and the package list refresh time; the network part reads them.
 StateDirectory=hostbeacon-helper
 StateDirectoryMode=0755

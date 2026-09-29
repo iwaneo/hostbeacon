@@ -1,0 +1,49 @@
+# The .deb and .rpm (v1 spec §4.3). packaging/build.sh sets the variables.
+name: hostbeacon
+arch: ${GOARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+maintainer: Hostbeacon <https://github.com/iwaneo/hostbeacon>
+description: |-
+  Shows this Linux Host in Home Assistant
+  The Hostbeacon Agent sends health, Available updates, and Update runs to
+  Home Assistant, and runs the Actions the owner turned on.
+homepage: https://github.com/iwaneo/hostbeacon
+license: MIT
+# Only systemd, so the package installs offline.
+depends:
+  - systemd
+
+contents:
+  - src: ${BIN}/hostbeacon
+    dst: /usr/bin/hostbeacon
+    expand: true
+    file_info: {mode: 0755}
+  - src: ${BIN}/hostbeacon-helper
+    dst: /usr/bin/hostbeacon-helper
+    expand: true
+    file_info: {mode: 0755}
+  - src: internal/install/files/systemd/*
+    dst: /usr/lib/systemd/system/
+    file_info: {mode: 0644}
+  - src: internal/install/files/sysusers.d/hostbeacon.conf
+    dst: /usr/lib/sysusers.d/hostbeacon.conf
+    file_info: {mode: 0644}
+  - src: internal/install/files/tmpfiles.d/hostbeacon.conf
+    dst: /usr/lib/tmpfiles.d/hostbeacon.conf
+    file_info: {mode: 0644}
+  - src: ../LICENSE
+    dst: /usr/share/doc/hostbeacon/copyright
+    packager: deb
+    file_info: {mode: 0644}
+  - src: ../LICENSE
+    dst: /usr/share/licenses/hostbeacon/LICENSE
+    packager: rpm
+    file_info: {mode: 0644}
+
+scripts:
+  preinstall: packaging/scripts/preinstall.sh
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh

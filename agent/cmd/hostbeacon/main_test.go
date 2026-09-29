@@ -120,6 +120,10 @@ func newTestOwner(t *testing.T, input string) *testOwner {
 		out:     o.output,
 		signals: func() identity.Signals { return installSignals },
 		restart: func() error { o.restarts++; return nil },
+		run: func(context.Context, string, ...string) ([]byte, error) {
+			return nil, errors.New("not on this Host")
+		},
+		tailscale: func() bool { return false },
 	}
 	if _, _, err := identity.Start(o.stateDir, installSignals); err != nil {
 		t.Fatal(err)
