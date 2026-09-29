@@ -189,6 +189,29 @@
       "available_updates": {
         "name": "Available updates"
       },
+      "last_update_run": {
+        "name": "Last Update run",
+        "state": {
+          "ok": "OK",
+          "failed": "Failed",
+          "needs_manual_update": "Needs manual update",
+          "none_yet": "None yet"
+        },
+        "state_attributes": {
+          "finished_at": {
+            "name": "Finished"
+          },
+          "installed": {
+            "name": "Installed"
+          },
+          "remaining": {
+            "name": "Left"
+          },
+          "error": {
+            "name": "Error"
+          }
+        }
+      },
       "environment": {
         "name": "Environment",
         "state": {
@@ -256,6 +279,21 @@
     "action_no_answer": {
       "message": "{host} did not answer the {action} request. Check that it is Online and try again."
     },
+    "update_run_not_admin": {
+      "message": "Only Home Assistant admins can update {host}."
+    },
+    "update_run_disabled": {
+      "message": "Update run is turned off on {host}. The Host owner can turn it on in the Agent config."
+    },
+    "update_run_failed": {
+      "message": "The Update run on {host} failed: {error}"
+    },
+    "update_run_needs_manual_update": {
+      "message": "{host} needs a manual update: the Update run would remove packages or change the distro release, so it installed nothing. See the release notes of Updates."
+    },
+    "update_run_result_unknown": {
+      "message": "The result of the Update run on {host} is unknown: the connection ended before the run did. Home Assistant shows the result when {host} reports again."
+    },
     "release_notes_not_supported": {
       "message": "Available updates are not supported on {host}."
     },
@@ -270,6 +308,9 @@
     },
     "release_notes_more": {
       "message": "+{count} more"
+    },
+    "release_notes_needs_manual_update": {
+      "message": "**Needs manual update:** {error}\n\nPackages: {packages}\n\nOn the Host, run `sudo apt full-upgrade` (Debian, Ubuntu) or `sudo dnf upgrade` (Fedora, RHEL), and check what it would change before you accept."
     },
     "release_notes_reboot_required_yes": {
       "message": "**Reboot required:** Yes"
@@ -330,6 +371,18 @@
     "two_machines": {
       "title": "Two machines share the identity of {host}",
       "description": "Two machines answered as {host} at the same time. One of them is probably a copy (for example, a cloned VM) that the Agent did not detect. Home Assistant stays connected to the saved address.\n\nOn the copy, run `sudo hostbeacon reset-identity`, then add it as a new Host."
+    },
+    "update_run_long": {
+      "title": "Update run on {host} is taking over 1 hour",
+      "description": "The Update run on {host} started more than 1 hour ago and is still running. Hostbeacon never stops an Update run.\n\nTo see what it is doing, run on the Host:\n\n`journalctl -u hostbeacon-update-run`\n\nThis repair goes away when the run ends."
+    },
+    "package_system_broken": {
+      "title": "Package system on {host} is broken",
+      "description": "The package system on {host} reports a problem, so updates may fail. Run this command on the Host to fix it, or to see what is wrong:\n\n`{command}`\n\nThis repair goes away when {host} reports that the package system works again."
+    },
+    "needs_manual_update": {
+      "title": "{host} needs a manual update",
+      "description": "The last Update run on {host} installed nothing, because it would remove packages or move the Host to another distro release. Hostbeacon never does either by itself.\n\nThe release notes of the {host} Updates entity list the packages. Update the Host by hand, and check what the package manager would change before you accept: `sudo apt full-upgrade` (Debian, Ubuntu) or `sudo dnf upgrade` (Fedora, RHEL).\n\nThis repair goes away when a later Update run passes its checks, or no Available updates are left."
     }
   }
 }

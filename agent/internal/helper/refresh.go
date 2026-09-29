@@ -93,14 +93,18 @@ func (p PackageListRefresh) Refresh(ctx context.Context, cfg config.Config) (Ref
 	if _, err := p.Run(ctx, args[0], args[1:]...); err != nil {
 		return "", fmt.Errorf("%s failed: %w", strings.Join(args[:2], " "), withStderr(err))
 	}
-	if err := os.MkdirAll(filepath.Dir(p.Stamp), 0o755); err != nil {
-		return "", err
-	}
-	stamp := p.Now().UTC().Format(time.RFC3339) + "\n"
-	if err := statefile.Write(p.Stamp, []byte(stamp), 0o644); err != nil {
+	if err := writeStamp(p.Stamp, p.Now()); err != nil {
 		return "", err
 	}
 	return RefreshDone, nil
+}
+
+// writeStamp stores the time of a successful package list refresh.
+func writeStamp(path string, now time.Time) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return statefile.Write(path, []byte(now.UTC().Format(time.RFC3339)+"\n"), 0o644)
 }
 
 // DetectPackageManager returns apt, dnf, or "" on distros without full

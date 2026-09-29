@@ -49,6 +49,10 @@ var DefaultPackageManagerPIDLocks = []string{
 // minUptime: no Reboot within 10 minutes of boot (v1 spec §9).
 const minUptime = 10 * time.Minute
 
+// updateRunStartTimeout limits how long the helper waits for the Update run
+// unit to take the package-task lock.
+const updateRunStartTimeout = 90 * time.Second
+
 const maxUser = 256
 
 // ActionRequest is an Action request as the network part passes it on. The
@@ -81,6 +85,12 @@ type ActionRunner struct {
 	// PackageManagerPIDLocks are held while they name a running process.
 	PackageManagerPIDLocks []string
 	Reboot                 func(ctx context.Context) error
+	// PackageManager is apt or dnf; "" on distros without full support,
+	// where Update run is refused.
+	PackageManager string
+	// UpdateRuns starts the Update run unit. Without it, Update run is
+	// refused.
+	UpdateRuns UpdateRunStarter
 
 	// mu makes the Action ID check and the log write one step.
 	mu sync.Mutex
@@ -129,6 +139,10 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 	if entry.Status == "refused" {
 		return Ack{Status: "refused", Reason: &entry.Reason, FirstResult: first}, nil, nil
 	}
+	if request.Action == protocol.ActionUpdateRun {
+		// The unit runs it now; its result comes through the run record.
+		return Ack{Status: "accepted"}, nil, nil
+	}
 	return Ack{Status: "accepted"}, func(ctx context.Context) protocol.ActionOutcome {
 		defer release()
 		return r.reboot(ctx, request)
@@ -136,7 +150,8 @@ func (r *ActionRunner) Request(cfg config.Config, request ActionRequest) (ack Ac
 }
 
 // guard returns why the request is refused, or "" when it may run. For an
-// accepted Reboot, release frees the package-task lock it holds.
+// accepted Reboot, release frees the package-task lock it holds. An accepted
+// Update run has already started: its unit holds the lock.
 func (r *ActionRunner) guard(cfg config.Config, request ActionRequest) (reason protocol.RefusalReason, first *protocol.ActionOutcome, release func()) {
 	found, first, err := r.Log.find(request.ActionID)
 	if err != nil {
@@ -146,29 +161,72 @@ func (r *ActionRunner) guard(cfg config.Config, request ActionRequest) (reason p
 	if found {
 		return protocol.ReasonDuplicate, first, nil
 	}
-	// Update run and Agent update come in later releases of this helper.
-	if !slices.Contains(cfg.EnabledActions, request.Action) || request.Action != protocol.ActionReboot {
+	if !slices.Contains(cfg.EnabledActions, request.Action) {
 		return protocol.ReasonDisabled, nil, nil
 	}
+	switch request.Action {
+	case protocol.ActionReboot:
+		reason, release = r.guardReboot()
+		return reason, nil, release
+	case protocol.ActionUpdateRun:
+		return r.startUpdateRun(request), nil, nil
+	}
+	// Agent update comes in a later release of this helper.
+	return protocol.ReasonDisabled, nil, nil
+}
+
+// startUpdateRun reserves the one run slot and starts the Update run unit
+// (v1 spec §8). It returns "" once the unit holds the package-task lock.
+func (r *ActionRunner) startUpdateRun(request ActionRequest) protocol.RefusalReason {
+	if r.PackageManager == "" || r.UpdateRuns == nil {
+		return protocol.ReasonDisabled
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), updateRunStartTimeout)
+	defer cancel()
+	// The helper handles one request at a time, so no other request can
+	// take the slot between this check and the start.
+	active, err := r.UpdateRuns.Active(ctx)
+	if err != nil {
+		r.Journal.Error("Update run refused: cannot read the Update run unit", "error", err)
+		return protocol.ReasonBusy
+	}
+	if active {
+		return protocol.ReasonUpdateRunRunning
+	}
+	// The unit takes the lock itself; this check spares starting it.
+	release, err := lockPackageTask(r.PackageTaskLock)
+	if err != nil {
+		r.Journal.Info("Update run refused: a package task holds the package-task lock", "error", err)
+		return protocol.ReasonBusy
+	}
+	release()
+	if err := r.UpdateRuns.Start(ctx, request.ActionID); err != nil {
+		r.Journal.Warn("Update run refused: the Update run unit did not take the package-task lock", "error", err)
+		return protocol.ReasonBusy
+	}
+	return ""
+}
+
+func (r *ActionRunner) guardReboot() (reason protocol.RefusalReason, release func()) {
 	uptime, err := r.Uptime()
 	if err != nil {
 		r.Journal.Error("cannot read the uptime, so Reboot is refused", "error", err)
-		return protocol.ReasonTooSoonAfterBoot, nil, nil
+		return protocol.ReasonTooSoonAfterBoot, nil
 	}
 	if uptime < minUptime {
-		return protocol.ReasonTooSoonAfterBoot, nil, nil
+		return protocol.ReasonTooSoonAfterBoot, nil
 	}
 	release, err = lockPackageTask(r.PackageTaskLock)
 	if err != nil {
 		r.Journal.Info("Reboot refused: a package task holds the package-task lock", "error", err)
-		return protocol.ReasonBusy, nil, nil
+		return protocol.ReasonBusy, nil
 	}
 	if held, err := anyLockHeld(r.PackageManagerLocks); held || err != nil || anyPIDLockHeld(r.PackageManagerPIDLocks) {
 		r.Journal.Info("Reboot refused: the package manager is busy", "lock", held, "error", err)
 		release()
-		return protocol.ReasonBusy, nil, nil
+		return protocol.ReasonBusy, nil
 	}
-	return "", nil, release
+	return "", release
 }
 
 func (r *ActionRunner) reboot(ctx context.Context, request ActionRequest) protocol.ActionOutcome {

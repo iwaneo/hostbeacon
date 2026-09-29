@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
@@ -27,6 +27,10 @@ from .pairing import pairing_id
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR, Platform.UPDATE]
 STORAGE_VERSION = 1
+# An Update run running longer gets the "taking over 1 hour" repair.
+LONG_UPDATE_RUN = timedelta(hours=1)
+# The repairs this Integration raises for a Host, by issue ID prefix.
+ISSUE_KINDS = ("certificate_changed", "two_machines", "update_run_long", "package_system_broken", "needs_manual_update")
 
 type HostbeaconConfigEntry = ConfigEntry[HostConnection]
 
@@ -75,6 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) -
 
     entry.async_on_unload(connection.add_listener(update_device))
     _track_problems(hass, entry, connection)
+    _track_update_repairs(hass, entry, connection)
     await _track_reboot(hass, entry, connection)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, connection.run(), f"hostbeacon connection {entry.title}")
@@ -115,6 +120,84 @@ def _track_problems(hass: HomeAssistant, entry: HostbeaconConfigEntry, connectio
             entry.async_start_reauth(hass)
 
     entry.async_on_unload(connection.add_listener(problem_changed))
+
+
+def _track_update_repairs(hass: HomeAssistant, entry: HostbeaconConfigEntry, connection: HostConnection) -> None:
+    """Raise and remove repairs 1 to 3 of v1 spec §7.7 from the Host's state.
+
+    No repair text or data holds a package name (v1 spec §7.4). While the Host
+    is Offline, they stay as they are.
+    """
+    raised: dict[str, bool] = {}
+    cancel_timer: Callable[[], None] | None = None
+    timer_run: str | None = None
+
+    def show(kind: str, on: bool, severity: ir.IssueSeverity, **placeholders: str) -> None:
+        if raised.get(kind) == on:
+            return
+        raised[kind] = on
+        issue_id = f"{kind}_{entry.entry_id}"
+        if not on:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            # The broken package system stays until the Host reports it fixed.
+            is_persistent=kind == "package_system_broken",
+            severity=severity,
+            translation_key=kind,
+            translation_placeholders={"host": entry.title, **placeholders},
+        )
+
+    @callback
+    def changed(fired: datetime | None = None) -> None:
+        """fired is the time the 1 hour timer fired."""
+        nonlocal cancel_timer, timer_run
+        if not connection.online:
+            return
+        run = connection.groups.update_run
+        started = dt_util.parse_datetime(run.started_at) if run and run.started_at else None
+        if not connection.update_running or started is None:
+            show("update_run_long", False, ir.IssueSeverity.WARNING)
+        elif (fired or dt_util.utcnow()) >= started + LONG_UPDATE_RUN:
+            show("update_run_long", True, ir.IssueSeverity.WARNING)
+        elif timer_run != run.run_id:
+            if cancel_timer is not None:
+                cancel_timer()
+            timer_run = run.run_id
+            cancel_timer = async_track_point_in_utc_time(hass, changed, started + LONG_UPDATE_RUN)
+
+        flags = connection.groups.flags
+        if flags is not None:
+            broken = flags.package_system_broken and flags.package_system_fix_command is not None
+            show(
+                "package_system_broken",
+                broken,
+                ir.IssueSeverity.ERROR,
+                command=flags.package_system_fix_command or "",
+            )
+
+        # Removed when a later run passes its test step, or no Available
+        # updates are left.
+        last, updates = connection.last_run, connection.groups.available_updates
+        show(
+            "needs_manual_update",
+            last is not None
+            and last.result == "needs_manual_update"
+            and not (updates is not None and updates.count == 0),
+            ir.IssueSeverity.WARNING,
+        )
+
+    @callback
+    def stop_timer() -> None:
+        if cancel_timer is not None:
+            cancel_timer()
+
+    entry.async_on_unload(connection.add_listener(changed))
+    entry.async_on_unload(stop_timer)
 
 
 def _store(hass: HomeAssistant, entry: ConfigEntry) -> Store[dict]:
@@ -173,7 +256,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: HostbeaconConfigEntry) 
     command to run on the Host.
     """
     await _store(hass, entry).async_remove()
-    for kind in ("certificate_changed", "two_machines"):
+    for kind in ISSUE_KINDS:
         ir.async_delete_issue(hass, DOMAIN, f"{kind}_{entry.entry_id}")
     key = base64.b64decode(entry.data[CONF_KEY])
     if await remove_pairing(
