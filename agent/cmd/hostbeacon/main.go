@@ -44,6 +44,15 @@ const usage = `Usage:
                       show each Home Assistant paired with this Host (run as root)
   hostbeacon pairings remove <ID or name>
                       remove a Pairing and close its connection (run as root)
+  hostbeacon status   show the Agent's identity and Pairings (run as root)
+  hostbeacon reset-identity [--yes]
+                      give this Host a new identity, as for a copy; removes every
+                      Pairing (run as root). Clone detection is best effort: run it
+                      on every copy of a Host before it goes online.
+  hostbeacon keep-identity [--drop-missing]
+                      keep this Host's identity and end an identity hold (run as root)
+  hostbeacon regenerate-key [--yes]
+                      make a new key and certificate; removes every Pairing (run as root)
   hostbeacon version  show the version
 `
 
@@ -61,6 +70,18 @@ func main() {
 		err = pair(args)
 	case "pairings":
 		err = pairings(args, os.Stdout, time.Now(), time.Local)
+	case "status", "reset-identity", "keep-identity", "regenerate-key":
+		if os.Geteuid() != 0 {
+			err = errors.New("run it as root: sudo hostbeacon " + command)
+			break
+		}
+		run := map[string]func([]string, owner) error{
+			"status":         status,
+			"reset-identity": resetIdentity,
+			"keep-identity":  keepIdentity,
+			"regenerate-key": regenerateKey,
+		}[command]
+		err = run(args, systemOwner())
 	case "version", "--version":
 		fmt.Println(version.String())
 	default:
@@ -180,13 +201,30 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot read the Host config, so no connections are accepted: %w", err)
 	}
-	id, err := identity.Load(*stateDir)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// The clone check, before any connection is accepted (v1 spec §4.4).
+	helperClient := helper.Client{Socket: *helperSocket}
+	signals := readSignals(ctx, "/", func(ctx context.Context) (*string, error) { return readSMBIOSWithRetry(ctx, helperClient) })
+	id, check, err := identity.Start(*stateDir, signals)
 	if err != nil {
 		return fmt.Errorf("cannot load the Agent identity: %w", err)
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	switch check.Outcome {
+	case identity.Copied:
+		log.Warn("this Host is a copy of another Host: the Agent made a new identity and removed every Pairing", "instance_id", id.InstanceID, "copied_from", id.CopiedFrom)
+		if err := helperClient.LogIdentityCopy(ctx, helper.IdentityCopy{InstanceID: id.InstanceID, CopiedFrom: id.CopiedFrom}); err != nil {
+			log.Error("cannot write the identity copy to the Action log", "error", err)
+		}
+	case identity.Hold:
+		log.Error(strings.ReplaceAll(holdAdvice(check.Missing), "\n", " ") + "Then restart the Agent.")
+		<-ctx.Done()
+		return nil
+	}
+	if len(signals.Unreadable) > 0 {
+		log.Warn("cannot read an identity signal; it is not checked", "signals", signals.Unreadable)
+	}
 
 	// The package manager may write its cache and log under HOME (dnf5 does).
 	// Without this directory, only reading Available updates on dnf fails.
@@ -231,7 +269,7 @@ func serve(args []string) error {
 		Hello: protocol.HelloRequest{
 			InstanceID:     id.InstanceID,
 			RunID:          identity.NewUUID(),
-			CopiedFrom:     []string{},
+			CopiedFrom:     append([]string{}, id.CopiedFrom...),
 			Hostname:       agent.Hostname,
 			AgentVersion:   agent.AgentVersion,
 			Capabilities:   agent.Capabilities,
@@ -245,7 +283,8 @@ func serve(args []string) error {
 			Architecture: runtime.GOARCH,
 			Kernel:       host.Kernel,
 		},
-		Actions: helper.Client{Socket: *helperSocket},
+		Actions: helperClient,
+		KnownID: func(hostID string) error { return identity.AddKnownID(*stateDir, hostID) },
 		Log:     log,
 	}
 	listener, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(hostConfig.Port)))
@@ -260,6 +299,25 @@ func serve(args []string) error {
 		}
 	}()
 	return s.Serve(ctx, listener)
+}
+
+// readSMBIOSWithRetry asks the root helper for the SMBIOS UUID. At boot the
+// helper may start a little later, so it tries for up to 30 seconds before the
+// signal counts as unreadable.
+func readSMBIOSWithRetry(ctx context.Context, client helper.Client) (*string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		uuid, err := client.ReadSMBIOSUUID(ctx)
+		if err == nil {
+			return uuid, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // forbiddenGroups returns the groups in names that give access to Docker,

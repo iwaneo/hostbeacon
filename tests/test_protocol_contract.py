@@ -129,5 +129,5 @@ def test_malformed_frame_is_an_error(case: dict) -> None:
 
 
 def test_protocol_version_matches_schema() -> None:
-    assert protocol.PROTOCOL_VERSION == SCHEMA["x-protocol-version"] == "1.0"
+    assert protocol.PROTOCOL_VERSION == SCHEMA["x-protocol-version"] == "1.1"
     assert protocol.PROTOCOL_MAJORS == [1]

@@ -124,6 +124,8 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		s.watch(ctx, conn)
 	case JobAction:
 		s.act(ctx, conn, cfg, req.Action)
+	case JobLogIdentityCopy:
+		s.logIdentityCopy(conn, req.Copy)
 	default:
 		s.Log.Warn("refused an unknown job", "job", req.Job)
 		writeReply(conn, reply{Error: fmt.Sprintf("unknown job %q", req.Job)})
@@ -168,6 +170,21 @@ func (s *Server) act(ctx context.Context, conn net.Conn, cfg config.Config, requ
 	defer cancel()
 	data, _ = json.Marshal(run(ctx))
 	writeReply(conn, reply{Result: data})
+}
+
+// logIdentityCopy writes the network part's report that it is a copy to the
+// Action log. The helper cannot check the report; it only keeps it.
+func (s *Server) logIdentityCopy(conn net.Conn, copy *IdentityCopy) {
+	if s.Actions == nil || copy == nil {
+		writeReply(conn, reply{Error: "no identity copy in the request"})
+		return
+	}
+	if err := s.Actions.Log.LogIdentityCopy(*copy); err != nil {
+		writeReply(conn, reply{Error: err.Error()})
+		return
+	}
+	s.Log.Warn("the Agent found that this Host is a copy and made a new identity", "instance_id", copy.InstanceID, "copied_from", copy.CopiedFrom)
+	writeReply(conn, reply{Result: json.RawMessage("{}")})
 }
 
 // watch sends one line per container change. It stops when the caller

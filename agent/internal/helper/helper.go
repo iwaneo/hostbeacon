@@ -22,7 +22,15 @@ const (
 	JobWatchContainers = "watch_containers"
 	JobReadSMBIOSUUID  = "read_smbios_uuid"
 	JobAction          = "action"
+	JobLogIdentityCopy = "log_identity_copy"
 )
+
+// IdentityCopy is what the network part found at start: this Host is a copy,
+// so the Agent now has a new instance ID and no Pairings (v1 spec §4.4).
+type IdentityCopy struct {
+	InstanceID string   `json:"instance_id"`
+	CopiedFrom []string `json:"copied_from"`
+}
 
 // SmartDisk is what SMART says about one physical disk.
 type SmartDisk struct {
@@ -59,6 +67,7 @@ type Containers struct {
 type request struct {
 	Job    string         `json:"job"`
 	Action *ActionRequest `json:"action,omitempty"`
+	Copy   *IdentityCopy  `json:"copy,omitempty"`
 }
 
 type reply struct {

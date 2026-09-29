@@ -226,8 +226,8 @@ func TestVersionMatchesSchema(t *testing.T) {
 		Version string `json:"x-protocol-version"`
 	}
 	readJSON(t, filepath.Join(protocolDir, "schema.json"), &schema)
-	if Version != schema.Version || Version != "1.0" {
-		t.Errorf("Version = %q, schema says %q, want 1.0", Version, schema.Version)
+	if Version != schema.Version || Version != "1.1" {
+		t.Errorf("Version = %q, schema says %q, want 1.1", Version, schema.Version)
 	}
 	if !reflect.DeepEqual(Majors, []int{1}) {
 		t.Errorf("Majors = %v, want [1]", Majors)

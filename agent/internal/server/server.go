@@ -58,6 +58,9 @@ type Server struct {
 	// Actions passes Action requests to the root helper, which checks, logs,
 	// and runs them. Without it, every Action is refused.
 	Actions Actions
+	// KnownID saves the Host ID Home Assistant sends in its hello reply, so
+	// a copy of this Host can report it. Nil means it is not saved.
+	KnownID func(hostID string) error
 	Log     *slog.Logger
 
 	// Limits for connections that have not logged in with a key. Zero means
@@ -176,6 +179,9 @@ type pairResponse struct {
 	Hostname   string `json:"hostname"`
 	Key        []byte `json:"key"`
 	Proof      []byte `json:"proof"`
+	// CopiedFrom lets Home Assistant warn that this Host is a copy before
+	// it Re-pairs a Host with it.
+	CopiedFrom []string `json:"copied_from"`
 }
 
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +203,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("paired with Home Assistant; waiting for its first login", "pairing", request.Name, "source", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pairResponse{InstanceID: s.Identity.InstanceID, Hostname: s.hostname(), Key: key, Proof: proof})
+	json.NewEncoder(w).Encode(pairResponse{InstanceID: s.Identity.InstanceID, Hostname: s.hostname(), Key: key, Proof: proof, CopiedFrom: s.Hello.CopiedFrom})
 }
 
 // hostname is the current hostname from the agent group.
@@ -284,6 +290,11 @@ func (s *Server) session(ctx context.Context, ws *websocket.Conn, login pairing.
 		if !slices.ContainsFunc(reply.ProtocolMajors, func(major int) bool { return slices.Contains(protocol.Majors, major) }) {
 			ws.Close(websocket.StatusPolicyViolation, "no common protocol major")
 			return errors.New("no common protocol major")
+		}
+		if reply.HostID != nil && s.KnownID != nil {
+			if err := s.KnownID(*reply.HostID); err != nil {
+				s.Log.Error("cannot save the Host ID Home Assistant knows this Agent as", "error", err)
+			}
 		}
 	case err := <-readDone:
 		return err
