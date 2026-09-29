@@ -212,7 +212,7 @@ async def test_needs_manual_update_repair_clears_when_no_updates_are_left(hass: 
     [
         ("update_run_running", "An Update run is already running on test-host."),
         ("busy", "test-host is busy with a package task. Try again later."),
-        ("disabled", "Update run is turned off on test-host. The Host owner can turn it on in the Agent config."),
+        ("disabled", "Update run is turned off on test-host. The Host owner can turn it on with `sudo hostbeacon setup`."),
         ("cannot_log", "test-host refused: the Agent cannot write its Action log."),
     ],
 )

@@ -9,14 +9,43 @@ Report it privately through GitHub:
 (the **Security** tab, then **Report a vulnerability**).
 
 Include what you found, how to reproduce it, and which version you used.
+Do not include Pairing keys, Pairing codes, or other secrets from your own
+Hosts. If you attach Home Assistant diagnostics, check the file first.
+
 This is a hobby project maintained by one person, so replies are best effort.
+A fix is released as a new version on
+[GitHub Releases](https://github.com/iwaneo/hostbeacon/releases), and the
+report is published as a GitHub security advisory after the release.
 
 ## Supported versions
 
-Only the latest release gets security fixes.
+Only the latest release gets security fixes. Update the Agent with
+`sudo hostbeacon update` or the **Agent** entity in Home Assistant, and the
+Integration in HACS.
 
 ## Scope
 
-Both parts of Hostbeacon are in scope: the Agent (installed on each Host) and
-the Integration (installed in Home Assistant). The security model is described
-in [the v1 spec](docs/spec/v1.md), sections 4, 5, and 12.
+In scope:
+
+- the Agent (installed on each Host), both the network part and the root
+  helper;
+- the Integration (installed in Home Assistant);
+- the release files and their signatures.
+
+What Hostbeacon promises, and the risks it accepts, are in
+[Security and privacy](docs/security-and-privacy.md). A problem that is listed
+there as an accepted risk is not a vulnerability, but a way to make it
+smaller is welcome.
+
+Out of scope: Home Assistant, HACS, the VPN, the distro's package manager and
+repositories, and GitHub itself.
+
+## Release signatures
+
+`SHA256SUMS` in each release is signed with minisign. The public keys are:
+
+- release key: `RWQdtGLWn0hUvBq2UHOd68XCxhTpoXJWHiBdDrfEPGnd3lPk/v6SxsVD`
+- backup key: `RWR9UElf4XqFiZVup9OaGQM40n2/eCDXq/mnh4UBvKcgdcULHudnvmuv`
+
+Both keys are also built into the Agent, which checks them before every Agent
+update.
