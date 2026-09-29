@@ -24,7 +24,7 @@ from .const import CONF_FINGERPRINT, CONF_KEY, DOMAIN
 from .pairing import pairing_id
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR, Platform.UPDATE]
 STORAGE_VERSION = 1
 
 type HostbeaconConfigEntry = ConfigEntry[HostConnection]

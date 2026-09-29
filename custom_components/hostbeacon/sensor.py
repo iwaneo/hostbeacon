@@ -190,6 +190,15 @@ CAPABILITY_SENSORS = (
         exists=_has("available_updates"),
         value=lambda c: c.groups.available_updates.count if c.groups.available_updates else None,
     ),
+    HostSensorDescription(
+        key="package_list_refreshed",
+        translation_key="package_list_refreshed",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        exists=_has("available_updates"),
+        value=lambda c: _timestamp(c.groups.available_updates.last_refresh) if c.groups.available_updates else None,
+    ),
 )
 
 

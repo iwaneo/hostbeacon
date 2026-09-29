@@ -59,7 +59,7 @@ CAPABILITY_KEYS = {
     "disks": ["disk_used_/", "disk_free_/"],
     "network": ["download_eth0", "upload_eth0", "downloaded_eth0", "uploaded_eth0"],
     "failed_services": ["failed_services"],
-    "available_updates": ["available_updates"],
+    "available_updates": ["available_updates", "package_list_refreshed"],
     "containers": ["containers_running", "containers_stopped", "containers_unhealthy"],
     "smart": [
         "disk_health_nvme0n1",
@@ -92,6 +92,7 @@ DEFAULT_OFF = {
     "kernel",
     "protocol_version",
     "last_seen",
+    "package_list_refreshed",
 }
 
 
@@ -183,7 +184,7 @@ async def test_default_off_sensors(hass: HomeAssistant, agent: FakeAgent) -> Non
         assert entry_ is not None, key
         disabled = entry_.disabled_by is er.RegistryEntryDisabler.INTEGRATION
         assert disabled == (key in DEFAULT_OFF), key
-    for key in ("environment", "kernel", "protocol_version", "last_seen"):
+    for key in ("environment", "kernel", "protocol_version", "last_seen", "package_list_refreshed"):
         assert registered(hass, entry.unique_id, key).entity_category == "diagnostic", key
 
 

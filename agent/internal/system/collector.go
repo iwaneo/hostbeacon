@@ -63,6 +63,8 @@ type Host struct {
 	Release      map[string]string
 	Kernel       *string
 	Capabilities []string
+	// Tasks is nil when systemd cannot be reached over D-Bus.
+	Tasks PackageTasks
 
 	services       ServiceSource
 	helper         RootHelper
@@ -96,7 +98,7 @@ func Detect(ctx context.Context, root string, run Command, statfs func(string) (
 	if services != nil {
 		h.Capabilities = append(h.Capabilities, CapabilityFailedServices)
 	}
-	if h.packageManager = DetectPackageManager(root); h.packageManager != "" {
+	if h.packageManager = helper.DetectPackageManager(root); h.packageManager != "" {
 		h.Capabilities = append(h.Capabilities, CapabilityAvailableUpdates)
 	}
 	if rootHelper != nil {
@@ -149,7 +151,7 @@ func NewCollector(host *Host, intervals Intervals, agent protocol.AgentInfo) *Co
 // Sample reads every group once, for the first snapshot. Groups for
 // missing capabilities are left out.
 func (c *Collector) Sample(ctx context.Context) protocol.Groups {
-	groups := protocol.Groups{Agent: c.agentGroup(), System: ptr(c.system.Sample()), Flags: c.flags()}
+	groups := protocol.Groups{Agent: c.agentGroup(), System: ptr(c.system.Sample()), Flags: c.flags(ctx)}
 	if c.host.has(CapabilityDisks) {
 		groups.Disks = ptr(c.disks.Sample())
 	}
@@ -195,7 +197,10 @@ func (c *Collector) Run(ctx context.Context, publish func(protocol.Groups)) {
 	every(c.intervals.System, func() protocol.Groups {
 		return protocol.Groups{Agent: c.agentGroup(), System: ptr(c.system.Sample())}
 	})
-	every(c.intervals.RebootRequired, func() protocol.Groups { return protocol.Groups{Flags: c.flags()} })
+	every(c.intervals.RebootRequired, func() protocol.Groups { return protocol.Groups{Flags: c.flags(ctx)} })
+	if c.host.Tasks != nil {
+		go c.watchPackageTasks(ctx, publish)
+	}
 	if c.host.has(CapabilityNetwork) {
 		every(c.intervals.Network, func() protocol.Groups { return protocol.Groups{Network: ptr(c.network.Sample())} })
 	}
@@ -231,21 +236,27 @@ func (c *Collector) agentGroup() *protocol.AgentInfo {
 	return &agent
 }
 
-// flags holds Reboot required and the last boot. The package task and
-// package system flags are not read yet.
-func (c *Collector) flags() *protocol.Flags {
-	return &protocol.Flags{
+// flags holds Reboot required, the last boot, and whether a package task
+// runs. The package system flags are not read yet.
+func (c *Collector) flags(ctx context.Context) *protocol.Flags {
+	flags := &protocol.Flags{
 		RebootRequired: RebootRequired(c.host.Root, c.host.Container),
 		LastBoot:       c.host.lastBoot,
 	}
+	if c.host.Tasks != nil {
+		// Unknown counts as not running: the flag has no unknown value.
+		flags.PackageTaskRunning, _ = c.host.Tasks.PackageTaskRunning(ctx)
+	}
+	return flags
 }
 
 // availableUpdates is unknown (count null) when the cache cannot be read.
 func (c *Collector) availableUpdates(ctx context.Context) *protocol.AvailableUpdates {
 	updates, err := ReadAvailableUpdates(ctx, c.host.Run, c.host.packageManager)
 	if err != nil {
-		return &protocol.AvailableUpdates{Packages: []protocol.Package{}}
+		updates = protocol.AvailableUpdates{Packages: []protocol.Package{}}
 	}
+	updates.LastRefresh = c.lastRefresh()
 	return &updates
 }
 
