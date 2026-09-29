@@ -1,0 +1,8 @@
+"""Shared test fixtures."""
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Let Home Assistant load the custom integration in every test."""
