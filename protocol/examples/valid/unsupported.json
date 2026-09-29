@@ -1,0 +1,10 @@
+{
+  "description": "Reply to a request with an unknown type.",
+  "message": {
+    "type": "unsupported",
+    "id": "agent-31",
+    "kind": "reply",
+    "reply_to": "ha-21",
+    "request_type": "restart_service"
+  }
+}

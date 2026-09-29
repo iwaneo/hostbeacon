@@ -1,0 +1,19 @@
+{
+  "description": "System group changed.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "system": {
+        "cpu_percent": 63.5,
+        "memory_percent": 41,
+        "memory_used_bytes": 3421765632,
+        "swap_percent": 0,
+        "load_1": 0.42,
+        "load_5": 0.35,
+        "load_15": 0.3
+      }
+    }
+  }
+}

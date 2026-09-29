@@ -1,0 +1,16 @@
+{
+  "description": "Available updates cannot be read right now and the list was never refreshed.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "available_updates": {
+        "count": null,
+        "packages": [],
+        "fingerprint": null,
+        "last_refresh": null
+      }
+    }
+  }
+}

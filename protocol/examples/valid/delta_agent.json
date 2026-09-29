@@ -1,0 +1,29 @@
+{
+  "description": "Agent group changed while connected: the owner turned Reboot off and a newer Agent is known.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "agent": {
+        "hostname": "nas",
+        "agent_version": "1.0.0",
+        "newest_agent_version": "1.2.0",
+        "capabilities": [
+          "load",
+          "temperatures",
+          "disks",
+          "network",
+          "failed_services",
+          "containers",
+          "smart",
+          "available_updates"
+        ],
+        "enabled_actions": [
+          "update_run",
+          "agent_update"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "description": "Network group changed.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "network": {
+        "interfaces": [
+          {
+            "name": "enp3s0",
+            "rx_bytes_per_second": 12300,
+            "tx_bytes_per_second": 4560,
+            "rx_bytes_total": 91827364512,
+            "tx_bytes_total": 12837465109
+          }
+        ]
+      }
+    }
+  }
+}

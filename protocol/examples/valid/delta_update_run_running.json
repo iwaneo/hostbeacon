@@ -1,0 +1,25 @@
+{
+  "description": "Update run installing, with a percent.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "update_run": {
+        "run_id": "8a7b6c5d-4e3f-4a1b-9c0d-e1f2a3b4c5d6",
+        "state": "running",
+        "percent": 42,
+        "started_at": "2026-09-29T10:00:00Z",
+        "finished_at": null,
+        "result": null,
+        "installed": null,
+        "remaining": null,
+        "error": null,
+        "needs_manual_update": {
+          "count": 0,
+          "names": []
+        }
+      }
+    }
+  }
+}

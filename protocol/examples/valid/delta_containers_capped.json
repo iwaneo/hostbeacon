@@ -1,0 +1,418 @@
+{
+  "description": "120 containers: counts cover all of them, items is capped at 100.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "containers": {
+        "count": 120,
+        "running": 118,
+        "stopped": 2,
+        "unhealthy": 0,
+        "items": [
+          {
+            "name": "app-000",
+            "state": "running"
+          },
+          {
+            "name": "app-001",
+            "state": "running"
+          },
+          {
+            "name": "app-002",
+            "state": "running"
+          },
+          {
+            "name": "app-003",
+            "state": "running"
+          },
+          {
+            "name": "app-004",
+            "state": "running"
+          },
+          {
+            "name": "app-005",
+            "state": "running"
+          },
+          {
+            "name": "app-006",
+            "state": "running"
+          },
+          {
+            "name": "app-007",
+            "state": "running"
+          },
+          {
+            "name": "app-008",
+            "state": "running"
+          },
+          {
+            "name": "app-009",
+            "state": "running"
+          },
+          {
+            "name": "app-010",
+            "state": "running"
+          },
+          {
+            "name": "app-011",
+            "state": "running"
+          },
+          {
+            "name": "app-012",
+            "state": "running"
+          },
+          {
+            "name": "app-013",
+            "state": "running"
+          },
+          {
+            "name": "app-014",
+            "state": "running"
+          },
+          {
+            "name": "app-015",
+            "state": "running"
+          },
+          {
+            "name": "app-016",
+            "state": "running"
+          },
+          {
+            "name": "app-017",
+            "state": "running"
+          },
+          {
+            "name": "app-018",
+            "state": "running"
+          },
+          {
+            "name": "app-019",
+            "state": "running"
+          },
+          {
+            "name": "app-020",
+            "state": "running"
+          },
+          {
+            "name": "app-021",
+            "state": "running"
+          },
+          {
+            "name": "app-022",
+            "state": "running"
+          },
+          {
+            "name": "app-023",
+            "state": "running"
+          },
+          {
+            "name": "app-024",
+            "state": "running"
+          },
+          {
+            "name": "app-025",
+            "state": "running"
+          },
+          {
+            "name": "app-026",
+            "state": "running"
+          },
+          {
+            "name": "app-027",
+            "state": "running"
+          },
+          {
+            "name": "app-028",
+            "state": "running"
+          },
+          {
+            "name": "app-029",
+            "state": "running"
+          },
+          {
+            "name": "app-030",
+            "state": "running"
+          },
+          {
+            "name": "app-031",
+            "state": "running"
+          },
+          {
+            "name": "app-032",
+            "state": "running"
+          },
+          {
+            "name": "app-033",
+            "state": "running"
+          },
+          {
+            "name": "app-034",
+            "state": "running"
+          },
+          {
+            "name": "app-035",
+            "state": "running"
+          },
+          {
+            "name": "app-036",
+            "state": "running"
+          },
+          {
+            "name": "app-037",
+            "state": "running"
+          },
+          {
+            "name": "app-038",
+            "state": "running"
+          },
+          {
+            "name": "app-039",
+            "state": "running"
+          },
+          {
+            "name": "app-040",
+            "state": "running"
+          },
+          {
+            "name": "app-041",
+            "state": "running"
+          },
+          {
+            "name": "app-042",
+            "state": "running"
+          },
+          {
+            "name": "app-043",
+            "state": "running"
+          },
+          {
+            "name": "app-044",
+            "state": "running"
+          },
+          {
+            "name": "app-045",
+            "state": "running"
+          },
+          {
+            "name": "app-046",
+            "state": "running"
+          },
+          {
+            "name": "app-047",
+            "state": "running"
+          },
+          {
+            "name": "app-048",
+            "state": "running"
+          },
+          {
+            "name": "app-049",
+            "state": "running"
+          },
+          {
+            "name": "app-050",
+            "state": "running"
+          },
+          {
+            "name": "app-051",
+            "state": "running"
+          },
+          {
+            "name": "app-052",
+            "state": "running"
+          },
+          {
+            "name": "app-053",
+            "state": "running"
+          },
+          {
+            "name": "app-054",
+            "state": "running"
+          },
+          {
+            "name": "app-055",
+            "state": "running"
+          },
+          {
+            "name": "app-056",
+            "state": "running"
+          },
+          {
+            "name": "app-057",
+            "state": "running"
+          },
+          {
+            "name": "app-058",
+            "state": "running"
+          },
+          {
+            "name": "app-059",
+            "state": "running"
+          },
+          {
+            "name": "app-060",
+            "state": "running"
+          },
+          {
+            "name": "app-061",
+            "state": "running"
+          },
+          {
+            "name": "app-062",
+            "state": "running"
+          },
+          {
+            "name": "app-063",
+            "state": "running"
+          },
+          {
+            "name": "app-064",
+            "state": "running"
+          },
+          {
+            "name": "app-065",
+            "state": "running"
+          },
+          {
+            "name": "app-066",
+            "state": "running"
+          },
+          {
+            "name": "app-067",
+            "state": "running"
+          },
+          {
+            "name": "app-068",
+            "state": "running"
+          },
+          {
+            "name": "app-069",
+            "state": "running"
+          },
+          {
+            "name": "app-070",
+            "state": "running"
+          },
+          {
+            "name": "app-071",
+            "state": "running"
+          },
+          {
+            "name": "app-072",
+            "state": "running"
+          },
+          {
+            "name": "app-073",
+            "state": "running"
+          },
+          {
+            "name": "app-074",
+            "state": "running"
+          },
+          {
+            "name": "app-075",
+            "state": "running"
+          },
+          {
+            "name": "app-076",
+            "state": "running"
+          },
+          {
+            "name": "app-077",
+            "state": "running"
+          },
+          {
+            "name": "app-078",
+            "state": "running"
+          },
+          {
+            "name": "app-079",
+            "state": "running"
+          },
+          {
+            "name": "app-080",
+            "state": "running"
+          },
+          {
+            "name": "app-081",
+            "state": "running"
+          },
+          {
+            "name": "app-082",
+            "state": "running"
+          },
+          {
+            "name": "app-083",
+            "state": "running"
+          },
+          {
+            "name": "app-084",
+            "state": "running"
+          },
+          {
+            "name": "app-085",
+            "state": "running"
+          },
+          {
+            "name": "app-086",
+            "state": "running"
+          },
+          {
+            "name": "app-087",
+            "state": "running"
+          },
+          {
+            "name": "app-088",
+            "state": "running"
+          },
+          {
+            "name": "app-089",
+            "state": "running"
+          },
+          {
+            "name": "app-090",
+            "state": "running"
+          },
+          {
+            "name": "app-091",
+            "state": "running"
+          },
+          {
+            "name": "app-092",
+            "state": "running"
+          },
+          {
+            "name": "app-093",
+            "state": "running"
+          },
+          {
+            "name": "app-094",
+            "state": "running"
+          },
+          {
+            "name": "app-095",
+            "state": "running"
+          },
+          {
+            "name": "app-096",
+            "state": "running"
+          },
+          {
+            "name": "app-097",
+            "state": "running"
+          },
+          {
+            "name": "app-098",
+            "state": "running"
+          },
+          {
+            "name": "app-099",
+            "state": "running"
+          }
+        ]
+      }
+    }
+  }
+}

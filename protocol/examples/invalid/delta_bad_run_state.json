@@ -1,0 +1,25 @@
+{
+  "description": "The Update run state must be one of the five states.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "update_run": {
+        "run_id": null,
+        "state": "paused",
+        "percent": null,
+        "started_at": null,
+        "finished_at": null,
+        "result": null,
+        "installed": null,
+        "remaining": null,
+        "error": null,
+        "needs_manual_update": {
+          "count": 0,
+          "names": []
+        }
+      }
+    }
+  }
+}

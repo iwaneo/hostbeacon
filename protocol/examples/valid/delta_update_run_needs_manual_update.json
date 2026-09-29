@@ -1,0 +1,27 @@
+{
+  "description": "Update run stopped before installing: apt would remove packages.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "update_run": {
+        "run_id": "8a7b6c5d-4e3f-4a1b-9c0d-e1f2a3b4c5d6",
+        "state": "finished",
+        "percent": null,
+        "started_at": "2026-09-29T10:00:00Z",
+        "finished_at": "2026-09-29T10:01:02Z",
+        "result": "needs_manual_update",
+        "installed": 0,
+        "remaining": 2,
+        "error": null,
+        "needs_manual_update": {
+          "count": 1,
+          "names": [
+            "libfoo1"
+          ]
+        }
+      }
+    }
+  }
+}

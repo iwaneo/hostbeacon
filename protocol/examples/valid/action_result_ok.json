@@ -1,0 +1,12 @@
+{
+  "description": "Agent update finished.",
+  "message": {
+    "type": "action_result",
+    "id": "agent-12",
+    "kind": "event",
+    "action_id": "d4c3b2a1-9f8e-4d7c-b6a5-493827160a5b",
+    "action": "agent_update",
+    "result": "ok",
+    "error": null
+  }
+}

@@ -1,0 +1,517 @@
+{
+  "description": "250 Available updates: the package list is capped at 100.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "available_updates": {
+        "count": 250,
+        "packages": [
+          {
+            "name": "lib-000",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-001",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-002",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-003",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-004",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-005",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-006",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-007",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-008",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-009",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-010",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-011",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-012",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-013",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-014",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-015",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-016",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-017",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-018",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-019",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-020",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-021",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-022",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-023",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-024",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-025",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-026",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-027",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-028",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-029",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-030",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-031",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-032",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-033",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-034",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-035",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-036",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-037",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-038",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-039",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-040",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-041",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-042",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-043",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-044",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-045",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-046",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-047",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-048",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-049",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-050",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-051",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-052",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-053",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-054",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-055",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-056",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-057",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-058",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-059",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-060",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-061",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-062",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-063",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-064",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-065",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-066",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-067",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-068",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-069",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-070",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-071",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-072",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-073",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-074",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-075",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-076",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-077",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-078",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-079",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-080",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-081",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-082",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-083",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-084",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-085",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-086",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-087",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-088",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-089",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-090",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-091",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-092",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-093",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-094",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-095",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-096",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-097",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-098",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          },
+          {
+            "name": "lib-099",
+            "installed_version": "1.0-1",
+            "new_version": "1.0-2"
+          }
+        ],
+        "fingerprint": "sha256:9a0e44b1c2d3e4f5",
+        "last_refresh": "2026-09-29T03:12:44.519Z"
+      }
+    }
+  }
+}

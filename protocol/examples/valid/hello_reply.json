@@ -1,0 +1,14 @@
+{
+  "description": "The Integration's answer to hello.",
+  "message": {
+    "type": "hello",
+    "id": "ha-1",
+    "kind": "reply",
+    "reply_to": "agent-1",
+    "integration_version": "1.0.0",
+    "protocol_version": "1.0",
+    "protocol_majors": [
+      1
+    ]
+  }
+}

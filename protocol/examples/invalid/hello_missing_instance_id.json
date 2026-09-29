@@ -1,0 +1,40 @@
+{
+  "description": "hello needs the instance ID.",
+  "message": {
+    "type": "hello",
+    "id": "agent-1",
+    "kind": "request",
+    "protocol_version": "1.0",
+    "protocol_majors": [
+      1
+    ],
+    "run_id": "b7e1d2c3-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
+    "copied_from": [],
+    "hostname": "nas",
+    "agent_version": "1.0.0",
+    "newest_agent_version": "1.1.0",
+    "capabilities": [
+      "load",
+      "temperatures",
+      "disks",
+      "network",
+      "failed_services",
+      "containers",
+      "smart",
+      "available_updates"
+    ],
+    "enabled_actions": [
+      "reboot",
+      "update_run",
+      "agent_update"
+    ],
+    "environment": "bare_metal",
+    "distro": {
+      "id": "debian",
+      "name": "Debian GNU/Linux",
+      "version": "13"
+    },
+    "architecture": "amd64",
+    "kernel": "6.12.48+deb13-amd64"
+  }
+}

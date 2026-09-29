@@ -1,0 +1,9 @@
+{
+  "description": "The Agent deleted the Pairing key.",
+  "message": {
+    "type": "pairing_remove",
+    "id": "agent-30",
+    "kind": "reply",
+    "reply_to": "ha-20"
+  }
+}
