@@ -195,16 +195,18 @@ func serve(args []string) error {
 	}
 	run := system.Exec([]string{"LANG=C", "LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=" + *cacheDir})
 	var services system.ServiceSource
+	var tasks system.PackageTasks
 	if systemd, err := system.ConnectSystemd(ctx); err != nil {
-		log.Warn("cannot read systemd over D-Bus, so failed services are not shown", "error", err)
+		log.Warn("cannot read systemd over D-Bus, so failed services and package tasks are not shown", "error", err)
 	} else {
 		defer systemd.Close()
-		services = systemd
+		services, tasks = systemd, systemd
 	}
 	if _, err := os.Stat(*helperSocket); err != nil {
 		log.Warn("cannot reach the root helper, so SMART and containers are not shown", "error", err)
 	}
 	host := system.Detect(ctx, "/", run, system.Statfs, services, helper.Client{Socket: *helperSocket}, time.Now)
+	host.Tasks = tasks
 	hostname, _ := os.Hostname()
 	agent := protocol.AgentInfo{
 		Hostname:     hostname,

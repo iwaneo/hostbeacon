@@ -176,6 +176,14 @@
       },
       "last_seen": {
         "name": "Last seen"
+      },
+      "package_list_refreshed": {
+        "name": "Package list refreshed"
+      }
+    },
+    "update": {
+      "updates": {
+        "name": "Updates"
       }
     }
   },
@@ -218,6 +226,60 @@
     },
     "action_no_answer": {
       "message": "{host} did not answer the {action} request. Check that it is Online and try again."
+    },
+    "release_notes_not_supported": {
+      "message": "Available updates are not supported on {host}."
+    },
+    "release_notes_unknown": {
+      "message": "The Host cannot read its Available updates right now."
+    },
+    "release_notes_none": {
+      "message": "No Available updates."
+    },
+    "release_notes_table_header": {
+      "message": "| Package | Installed | New |"
+    },
+    "release_notes_more": {
+      "message": "+{count} more"
+    },
+    "release_notes_reboot_required_yes": {
+      "message": "**Reboot required:** Yes"
+    },
+    "release_notes_reboot_required_no": {
+      "message": "**Reboot required:** No"
+    },
+    "release_notes_reboot_required_unknown": {
+      "message": "**Reboot required:** Unknown"
+    },
+    "release_notes_last_run_none": {
+      "message": "**Last Update run:** None yet"
+    },
+    "release_notes_last_run_waiting_for_lock": {
+      "message": "**Update run:** Waiting for the package manager"
+    },
+    "release_notes_last_run_running": {
+      "message": "**Update run:** Running"
+    },
+    "release_notes_last_run_result_unknown": {
+      "message": "**Last Update run:** Result unknown"
+    },
+    "release_notes_last_run_ok": {
+      "message": "**Last Update run:** OK, {age} ago"
+    },
+    "release_notes_last_run_failed": {
+      "message": "**Last Update run:** Failed, {age} ago. {error}"
+    },
+    "release_notes_last_run_needs_manual_update": {
+      "message": "**Last Update run:** Needs manual update, {age} ago"
+    },
+    "release_notes_list_age": {
+      "message": "**Package list refreshed:** {age} ago"
+    },
+    "release_notes_list_never": {
+      "message": "**Package list refreshed:** Not yet by Hostbeacon"
+    },
+    "release_notes_update_run_off": {
+      "message": "Update run is turned off on {host}, so Install is not offered. The Host owner can turn it on in the Agent config."
     }
   }
 }

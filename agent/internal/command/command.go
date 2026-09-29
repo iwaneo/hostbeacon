@@ -20,9 +20,13 @@ type Stream func(ctx context.Context, line func(string), name string, args ...st
 
 // Exec runs programs with the given environment and stops them after 2
 // minutes.
-func Exec(env []string) Command {
+func Exec(env []string) Command { return ExecFor(env, timeout) }
+
+// ExecFor runs programs with the given environment and stops them after
+// limit.
+func ExecFor(env []string, limit time.Duration) Command {
 	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(ctx, timeout)
+		ctx, cancel := context.WithTimeout(ctx, limit)
 		defer cancel()
 		command := exec.CommandContext(ctx, name, args...)
 		command.Env = env

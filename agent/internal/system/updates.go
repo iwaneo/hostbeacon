@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -15,25 +14,13 @@ import (
 
 const maxNames = 100
 
-// DetectPackageManager returns apt, dnf, or "" on distros without full
-// support.
-func DetectPackageManager(root string) string {
-	switch {
-	case exists(filepath.Join(root, "usr", "bin", "apt-get")):
-		return "apt"
-	case exists(filepath.Join(root, "usr", "bin", "dnf")):
-		return "dnf"
-	}
-	return ""
-}
-
 type update struct {
 	name, arch, installed, available string
 }
 
 // ReadAvailableUpdates reads the Available updates from the local package
 // cache, without root. It never refreshes the package list. The last
-// refresh time stays null here.
+// refresh time stays null here; the Collector adds it.
 func ReadAvailableUpdates(ctx context.Context, run Command, manager string) (protocol.AvailableUpdates, error) {
 	var updates []update
 	var err error

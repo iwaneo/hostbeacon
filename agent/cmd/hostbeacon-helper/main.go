@@ -24,8 +24,10 @@ import (
 )
 
 const usage = `Usage:
-  hostbeacon-helper serve    run the root helper (systemd starts it as root)
-  hostbeacon-helper version  show the version
+  hostbeacon-helper serve                 run the root helper (systemd starts it as root)
+  hostbeacon-helper refresh-package-list  refresh the package list if it is older than 24 hours
+                                          (the root timer runs it)
+  hostbeacon-helper version               show the version
 `
 
 func main() {
@@ -38,6 +40,8 @@ func main() {
 	switch name, args := os.Args[1], os.Args[2:]; name {
 	case "serve":
 		err = serve(args)
+	case "refresh-package-list":
+		err = refreshPackageList(args)
 	case "version", "--version":
 		fmt.Println(version.String())
 	default:
@@ -109,6 +113,43 @@ func serve(args []string) error {
 	}
 	log.Info("listening", "socket", *socket, "user", *agentUser)
 	return server.Serve(ctx, listener)
+}
+
+// refreshPackageList refreshes the package list for the root timer (v1 spec
+// §4.6). A skipped turn is not an error; a failed refresh is, so systemd
+// shows the unit as failed.
+func refreshPackageList(args []string) error {
+	flags := flag.NewFlagSet("refresh-package-list", flag.ExitOnError)
+	configPath := flags.String("config", config.DefaultPath, "the Host config file")
+	flags.Parse(args)
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	if os.Geteuid() != 0 {
+		return errors.New("must run as root")
+	}
+	// Fail closed: without a readable Host config, nothing runs.
+	cfg, err := config.LoadRootOwned(*configPath)
+	if err != nil {
+		return fmt.Errorf("cannot read the Host config, so the package list is not refreshed: %w", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	refresh := helper.PackageListRefresh{
+		Manager: helper.DetectPackageManager("/"),
+		// systemd stops the unit sooner if it hangs.
+		Run:                    command.ExecFor([]string{"LANG=C", "LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}, time.Hour),
+		Stamp:                  helper.DefaultPackageListStamp,
+		PackageTaskLock:        helper.DefaultPackageTaskLock,
+		PackageManagerLocks:    helper.DefaultPackageManagerLocks,
+		PackageManagerPIDLocks: helper.DefaultPackageManagerPIDLocks,
+		Now:                    time.Now,
+	}
+	result, err := refresh.Refresh(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	log.Info("package list refresh", "result", result)
+	return nil
 }
 
 // listen makes the socket. Only root and the Agent's group can connect;

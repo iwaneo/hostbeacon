@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -12,21 +11,6 @@ import (
 const aptList = "apt list --upgradable -o APT::Cmd::Disable-Script-Warning=true"
 const dnfUpgrades = "dnf --cacheonly --quiet repoquery --upgrades --latest-limit=1 --queryformat %{name} %{arch} %{evr}\\n"
 const rpmInstalled = "rpm -qa --queryformat %{NAME} %{ARCH} %{EVR}\\n"
-
-func TestDetectPackageManager(t *testing.T) {
-	root := t.TempDir()
-	if got := DetectPackageManager(root); got != "" {
-		t.Errorf("empty Host: %q, want none", got)
-	}
-	writeFile(t, filepath.Join(root, "usr", "bin", "dnf"), "")
-	if got := DetectPackageManager(root); got != "dnf" {
-		t.Errorf("got %q, want dnf", got)
-	}
-	writeFile(t, filepath.Join(root, "usr", "bin", "apt-get"), "")
-	if got := DetectPackageManager(root); got != "apt" {
-		t.Errorf("got %q, want apt", got)
-	}
-}
 
 func TestAptAvailableUpdates(t *testing.T) {
 	run := fakeCommands{aptList: {out: `Listing...
