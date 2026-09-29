@@ -1,5 +1,5 @@
 {
-  "description": "Values are numbers, text, or null.",
+  "description": "cpu_percent is a number or null.",
   "message": {
     "type": "delta",
     "id": "agent-3",

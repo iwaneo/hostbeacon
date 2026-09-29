@@ -27,10 +27,17 @@ What the tests check:
 - `unknown/`: matches the schema; both sides read it as an unknown type without
   an error, so the connection stays open, and reply `unsupported` only to a
   request.
-- `invalid/`: the schema rejects it.
+- `invalid/`: the schema rejects it, and both readers refuse it.
 - `malformed.json`: frames both readers must refuse with an error.
+
+Both writers refuse to write a message their own reader would refuse.
 
 ## Changing the protocol
 
-A new minor only adds optional fields or message types. Update the schema, its
-`x-protocol-version`, the examples, and both readers in the same change.
+A new minor only adds optional fields or message types. Lists of fixed values
+(for example `action`, `state`, `reason`) are closed within a major: a reader
+refuses a value it does not know. `capabilities` is the exception; readers
+ignore unknown capabilities.
+
+Update the schema, its `x-protocol-version`, the examples, and both readers in
+the same change.

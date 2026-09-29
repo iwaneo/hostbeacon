@@ -1,9 +1,12 @@
 package protocol
 
+import "errors"
+
 // The types below follow protocol/schema.json. A pointer field is a value
-// that may be null. A field with omitempty may be left out of the message;
-// every other field is required. Slices must not be nil when a message is
-// written, or they are written as null.
+// that may be null. A field with omitempty may be left out of the message but
+// is never null; every other field is required. The tags enum, format, max,
+// and min hold the schema rules that Decode checks (see check in protocol.go).
+// Encode refuses a nil slice, because it would be written as null.
 
 // Action is an Action Home Assistant can request.
 type Action string
@@ -30,6 +33,7 @@ const (
 
 // --- State groups ---
 
+// AgentInfo is the agent group. hello carries the same fields.
 type AgentInfo struct {
 	Hostname           string   `json:"hostname"`
 	AgentVersion       string   `json:"agent_version"`
@@ -38,6 +42,7 @@ type AgentInfo struct {
 	EnabledActions     []Action `json:"enabled_actions" enum:"reboot,update_run,agent_update"`
 }
 
+// System is the system group: CPU, memory, and load.
 type System struct {
 	CPUPercent      *float64 `json:"cpu_percent"`
 	MemoryPercent   *float64 `json:"memory_percent"`
@@ -48,6 +53,7 @@ type System struct {
 	Load15          *float64 `json:"load_15"`
 }
 
+// Mount is one real mount in the disks group.
 type Mount struct {
 	Mount       string   `json:"mount"`
 	UsedPercent *float64 `json:"used_percent"`
@@ -55,10 +61,12 @@ type Mount struct {
 	TotalBytes  *int64   `json:"total_bytes"`
 }
 
+// Disks is the disks group: space per real mount.
 type Disks struct {
 	Mounts []Mount `json:"mounts"`
 }
 
+// Interface is one physical network interface in the network group.
 type Interface struct {
 	Name             string   `json:"name"`
 	RxBytesPerSecond *float64 `json:"rx_bytes_per_second"`
@@ -67,10 +75,12 @@ type Interface struct {
 	TxBytesTotal     *int64   `json:"tx_bytes_total"`
 }
 
+// Network is the network group: traffic per physical interface.
 type Network struct {
 	Interfaces []Interface `json:"interfaces"`
 }
 
+// Temperatures is the temperatures group.
 type Temperatures struct {
 	CPUCelsius *float64 `json:"cpu_celsius"`
 }
@@ -78,22 +88,25 @@ type Temperatures struct {
 // NameList is a count of the full set plus a list capped at 100 names.
 type NameList struct {
 	Count *int64   `json:"count"`
-	Names []string `json:"names"`
+	Names []string `json:"names" max:"100"`
 }
 
+// Container is one Docker or Podman container in the containers group.
 type Container struct {
 	Name  string `json:"name"`
 	State string `json:"state" enum:"running,stopped,unhealthy"`
 }
 
+// Containers is the containers group. The counts cover every container.
 type Containers struct {
 	Count     *int64      `json:"count"`
 	Running   *int64      `json:"running"`
 	Stopped   *int64      `json:"stopped"`
 	Unhealthy *int64      `json:"unhealthy"`
-	Items     []Container `json:"items"`
+	Items     []Container `json:"items" max:"100"`
 }
 
+// SmartDisk is one physical disk in the SMART group.
 type SmartDisk struct {
 	Device             string   `json:"device"`
 	Health             *string  `json:"health" enum:"ok,failing"`
@@ -101,30 +114,33 @@ type SmartDisk struct {
 	WearPercent        *float64 `json:"wear_percent"`
 }
 
+// Smart is the SMART group.
 type Smart struct {
 	Disks []SmartDisk `json:"disks"`
 }
 
+// Package is one Available update.
 type Package struct {
 	Name             string `json:"name"`
 	InstalledVersion string `json:"installed_version"`
 	NewVersion       string `json:"new_version"`
 }
 
+// AvailableUpdates is the Available updates group.
 type AvailableUpdates struct {
 	Count       *int64    `json:"count"`
-	Packages    []Package `json:"packages"`
+	Packages    []Package `json:"packages" max:"100"`
 	Fingerprint *string   `json:"fingerprint"`
-	LastRefresh *string   `json:"last_refresh"`
+	LastRefresh *string   `json:"last_refresh" format:"time"`
 }
 
 // UpdateRun is the Update run record kept on the Host.
 type UpdateRun struct {
-	RunID             *string  `json:"run_id"`
+	RunID             *string  `json:"run_id" format:"uuid"`
 	State             string   `json:"state" enum:"idle,waiting_for_lock,running,finished,result_unknown"`
 	Percent           *float64 `json:"percent"`
-	StartedAt         *string  `json:"started_at"`
-	FinishedAt        *string  `json:"finished_at"`
+	StartedAt         *string  `json:"started_at" format:"time"`
+	FinishedAt        *string  `json:"finished_at" format:"time"`
 	Result            *string  `json:"result" enum:"ok,failed,needs_manual_update"`
 	Installed         *int64   `json:"installed"`
 	Remaining         *int64   `json:"remaining"`
@@ -132,12 +148,13 @@ type UpdateRun struct {
 	NeedsManualUpdate NameList `json:"needs_manual_update"`
 }
 
+// Flags is the flags group.
 type Flags struct {
 	RebootRequired          string  `json:"reboot_required" enum:"yes,no,unknown"`
 	PackageTaskRunning      bool    `json:"package_task_running"`
 	PackageSystemBroken     bool    `json:"package_system_broken"`
 	PackageSystemFixCommand *string `json:"package_system_fix_command"`
-	LastBoot                *string `json:"last_boot"`
+	LastBoot                *string `json:"last_boot" format:"time"`
 }
 
 // Groups holds state groups. A nil group is not in the message.
@@ -157,6 +174,7 @@ type Groups struct {
 
 // --- Messages ---
 
+// Distro is read from /etc/os-release.
 type Distro struct {
 	ID      *string `json:"id"`
 	Name    *string `json:"name"`
@@ -168,9 +186,9 @@ type HelloRequest struct {
 	ID                 string   `json:"id"`
 	ProtocolVersion    string   `json:"protocol_version"`
 	ProtocolMajors     []int    `json:"protocol_majors"`
-	InstanceID         string   `json:"instance_id"`
-	RunID              string   `json:"run_id"`
-	CopiedFrom         []string `json:"copied_from"`
+	InstanceID         string   `json:"instance_id" format:"uuid"`
+	RunID              string   `json:"run_id" format:"uuid"`
+	CopiedFrom         []string `json:"copied_from" format:"uuid"`
 	Hostname           string   `json:"hostname"`
 	AgentVersion       string   `json:"agent_version"`
 	NewestAgentVersion *string  `json:"newest_agent_version"`
@@ -191,23 +209,27 @@ type HelloReply struct {
 	ProtocolMajors     []int  `json:"protocol_majors"`
 }
 
+// Snapshot is the full state, sent after hello.
 type Snapshot struct {
 	ID     string `json:"id"`
 	Groups Groups `json:"groups"`
 }
 
+// Delta carries only the changed groups. Each group in it is complete.
 type Delta struct {
 	ID     string `json:"id"`
-	Groups Groups `json:"groups"`
+	Groups Groups `json:"groups" min:"1"`
 }
 
+// ActionRequest asks the Agent to run an Action.
 type ActionRequest struct {
 	ID       string  `json:"id"`
-	ActionID string  `json:"action_id"`
+	ActionID string  `json:"action_id" format:"uuid"`
 	Action   Action  `json:"action" enum:"reboot,update_run,agent_update"`
 	User     *string `json:"user"` // nil means no HA user
 }
 
+// ActionOutcome is the result of an Action.
 type ActionOutcome struct {
 	Result string  `json:"result" enum:"ok,failed"`
 	Error  *string `json:"error"`
@@ -217,15 +239,16 @@ type ActionOutcome struct {
 type ActionAck struct {
 	ID          string         `json:"id"`
 	ReplyTo     string         `json:"reply_to"`
-	ActionID    string         `json:"action_id"`
+	ActionID    string         `json:"action_id" format:"uuid"`
 	Status      string         `json:"status" enum:"accepted,refused"`
 	Reason      *RefusalReason `json:"reason" enum:"disabled,busy,update_run_running,too_soon_after_boot,cannot_log,duplicate,not_allowed,unknown_target"`
 	FirstResult *ActionOutcome `json:"first_result"` // only for ReasonDuplicate
 }
 
+// ActionResult is the later result of an accepted Action.
 type ActionResult struct {
 	ID       string  `json:"id"`
-	ActionID string  `json:"action_id"`
+	ActionID string  `json:"action_id" format:"uuid"`
 	Action   Action  `json:"action" enum:"reboot,update_run,agent_update"`
 	Result   string  `json:"result" enum:"ok,failed"`
 	Error    *string `json:"error"`
@@ -236,6 +259,7 @@ type PairingRemoveRequest struct {
 	ID string `json:"id"`
 }
 
+// PairingRemoveReply confirms that the Pairing key is deleted.
 type PairingRemoveReply struct {
 	ID      string `json:"id"`
 	ReplyTo string `json:"reply_to"`
@@ -256,6 +280,25 @@ type Unknown struct {
 	Kind Kind
 }
 
+// Rules that tags cannot say. Decode and Encode call them.
+
+func (s *Snapshot) checkRules() error {
+	if s.Groups.Agent == nil || s.Groups.System == nil || s.Groups.UpdateRun == nil || s.Groups.Flags == nil {
+		return errors.New("a snapshot needs the agent, system, update_run, and flags groups")
+	}
+	return nil
+}
+
+func (a *ActionAck) checkRules() error {
+	if (a.Status == "refused") != (a.Reason != nil) {
+		return errors.New("a refusal needs a reason, and an acceptance has none")
+	}
+	if a.FirstResult != nil && (a.Reason == nil || *a.Reason != ReasonDuplicate) {
+		return errors.New("only a duplicate carries the first result")
+	}
+	return nil
+}
+
 func (*HelloRequest) header() (string, Kind)         { return "hello", KindRequest }
 func (*HelloReply) header() (string, Kind)           { return "hello", KindReply }
 func (*Snapshot) header() (string, Kind)             { return "snapshot", KindEvent }
@@ -268,16 +311,23 @@ func (*PairingRemoveReply) header() (string, Kind)   { return "pairing_remove", 
 func (*Unsupported) header() (string, Kind)          { return "unsupported", KindReply }
 func (u *Unknown) header() (string, Kind)            { return u.Type, u.Kind }
 
-// newKnown returns an empty message for a known type and kind.
-var newKnown = map[[2]string]func() Message{
-	{"hello", "request"}:          func() Message { return new(HelloRequest) },
-	{"hello", "reply"}:            func() Message { return new(HelloReply) },
-	{"snapshot", "event"}:         func() Message { return new(Snapshot) },
-	{"delta", "event"}:            func() Message { return new(Delta) },
-	{"action_request", "request"}: func() Message { return new(ActionRequest) },
-	{"action_ack", "reply"}:       func() Message { return new(ActionAck) },
-	{"action_result", "event"}:    func() Message { return new(ActionResult) },
-	{"pairing_remove", "request"}: func() Message { return new(PairingRemoveRequest) },
-	{"pairing_remove", "reply"}:   func() Message { return new(PairingRemoveReply) },
-	{"unsupported", "reply"}:      func() Message { return new(Unsupported) },
-}
+// knownMessages makes an empty message for each known type and kind.
+var knownMessages = func() map[[2]string]func() Message {
+	byHeader := make(map[[2]string]func() Message)
+	for _, newMessage := range []func() Message{
+		func() Message { return new(HelloRequest) },
+		func() Message { return new(HelloReply) },
+		func() Message { return new(Snapshot) },
+		func() Message { return new(Delta) },
+		func() Message { return new(ActionRequest) },
+		func() Message { return new(ActionAck) },
+		func() Message { return new(ActionResult) },
+		func() Message { return new(PairingRemoveRequest) },
+		func() Message { return new(PairingRemoveReply) },
+		func() Message { return new(Unsupported) },
+	} {
+		messageType, kind := newMessage().header()
+		byHeader[[2]string{messageType, string(kind)}] = newMessage
+	}
+	return byHeader
+}()

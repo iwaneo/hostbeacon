@@ -73,5 +73,35 @@
     "name": "null_object",
     "description": "Required objects are never null.",
     "frame": "{\"type\": \"snapshot\", \"id\": \"a\", \"kind\": \"event\", \"groups\": null}"
+  },
+  {
+    "name": "null_group",
+    "description": "A group is left out when it did not change, never null.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {\"agent\": null}}"
+  },
+  {
+    "name": "nan",
+    "description": "NaN is not JSON.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {\"temperatures\": {\"cpu_celsius\": NaN}}}"
+  },
+  {
+    "name": "number_too_large",
+    "description": "Numbers must fit a 64-bit float.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {\"temperatures\": {\"cpu_celsius\": 1e400}}}"
+  },
+  {
+    "name": "integer_too_large",
+    "description": "Whole numbers must fit a signed 64-bit integer.",
+    "frame": "{\"type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {\"failed_services\": {\"count\": 9223372036854775808, \"names\": []}}}"
+  },
+  {
+    "name": "envelope_key_case",
+    "description": "Keys match exactly; a key that differs from a known one only by case is refused.",
+    "frame": "{\"Type\": \"delta\", \"id\": \"a\", \"kind\": \"event\", \"groups\": {}}"
+  },
+  {
+    "name": "field_key_case",
+    "description": "Also inside a message.",
+    "frame": "{\"type\": \"pairing_remove\", \"id\": \"a\", \"kind\": \"reply\", \"reply_to\": \"b\", \"Reply_To\": \"c\"}"
   }
 ]

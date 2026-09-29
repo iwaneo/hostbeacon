@@ -71,6 +71,17 @@ def test_invalid_example_is_rejected_by_schema(example: dict) -> None:
     assert not VALIDATOR.is_valid(example["message"]), example["description"]
 
 
+@pytest.mark.parametrize("example", examples("invalid"))
+def test_integration_refuses_invalid_example(example: dict) -> None:
+    with pytest.raises(protocol.ProtocolError):
+        protocol.decode(json.dumps(example["message"]))
+
+
+def test_integration_does_not_write_what_it_would_refuse() -> None:
+    with pytest.raises(protocol.ProtocolError):
+        protocol.encode(protocol.Delta(id="a", groups=protocol.Groups()))
+
+
 @pytest.mark.parametrize("example", examples("valid"))
 def test_integration_reads_and_writes_example(example: dict) -> None:
     """Reading a message and writing it back gives the same message, minus unknown fields."""
@@ -80,7 +91,7 @@ def test_integration_reads_and_writes_example(example: dict) -> None:
 
 
 def test_integration_reads_hello_fields() -> None:
-    example = json.loads((PROTOCOL_DIR / "examples/valid/hello_request.json").read_text())
+    example = json.loads((PROTOCOL_DIR / "examples/valid/hello_request.json").read_text(encoding="utf-8"))
 
     hello = protocol.decode(json.dumps(example["message"]))
 

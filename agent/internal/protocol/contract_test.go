@@ -98,6 +98,29 @@ func TestInvalidExamplesAreRejectedBySchema(t *testing.T) {
 	}
 }
 
+func TestAgentRefusesInvalidExamples(t *testing.T) {
+	for name, e := range loadExamples(t, "invalid") {
+		t.Run(name, func(t *testing.T) {
+			if message, err := Decode(e.Message); err == nil {
+				t.Errorf("Decode returned %#v, want an error: %s", message, e.Description)
+			}
+		})
+	}
+}
+
+func TestAgentDoesNotWriteWhatItWouldRefuse(t *testing.T) {
+	for name, message := range map[string]Message{
+		"no groups": &Delta{ID: "a"},
+		"nil list":  &Delta{ID: "a", Groups: Groups{Disks: &Disks{}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if frame, err := Encode(message); err == nil {
+				t.Errorf("Encode wrote %s, want an error", frame)
+			}
+		})
+	}
+}
+
 // Reading a message and writing it back gives the same message, minus unknown fields.
 func TestAgentReadsAndWritesExamples(t *testing.T) {
 	for name, e := range loadExamples(t, "valid") {
@@ -162,9 +185,11 @@ func TestUnknownTypeIsIgnoredAndARequestGetsUnsupported(t *testing.T) {
 			}
 
 			var want struct{ ID string }
-			expectReply := string(e.Reply) != "null"
+			expectReply := len(e.Reply) > 0 && string(e.Reply) != "null"
 			if expectReply {
-				_ = json.Unmarshal(e.Reply, &want)
+				if err := json.Unmarshal(e.Reply, &want); err != nil {
+					t.Fatal(err)
+				}
 			}
 			reply, ok := UnsupportedReply(unknown, want.ID)
 			if ok != expectReply {
