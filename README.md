@@ -229,6 +229,8 @@ and Pairings.
 - Agent: `cd agent && go vet ./... && go test ./...`
 - Integration: `uv run pytest`
 - Protocol schema and shared examples: [`protocol/`](protocol/README.md)
+- Load test, 100 simulated Agents (needs Docker): `uv run python -m tests.load`
+- Releases: [Releasing](docs/releasing.md)
 
 ## Security
 

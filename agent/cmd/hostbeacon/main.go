@@ -25,6 +25,7 @@ import (
 	"github.com/iwaneo/hostbeacon/agent/internal/config"
 	"github.com/iwaneo/hostbeacon/agent/internal/discovery"
 	"github.com/iwaneo/hostbeacon/agent/internal/helper"
+	"github.com/iwaneo/hostbeacon/agent/internal/hugepages"
 	"github.com/iwaneo/hostbeacon/agent/internal/identity"
 	"github.com/iwaneo/hostbeacon/agent/internal/install"
 	"github.com/iwaneo/hostbeacon/agent/internal/pairing"
@@ -237,6 +238,9 @@ func serve(args []string) error {
 	helperSocket := flags.String("helper", helper.DefaultSocket, "the root helper's socket")
 	flags.Parse(args)
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if err := hugepages.Disable(); err != nil {
+		log.Warn("cannot turn off transparent huge pages", "error", err)
+	}
 
 	// These groups would give the network part root's reach (v1 spec §4.1).
 	if groups := forbiddenGroups(groupNames()); len(groups) > 0 {

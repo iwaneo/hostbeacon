@@ -20,6 +20,7 @@ import (
 	"github.com/iwaneo/hostbeacon/agent/internal/command"
 	"github.com/iwaneo/hostbeacon/agent/internal/config"
 	"github.com/iwaneo/hostbeacon/agent/internal/helper"
+	"github.com/iwaneo/hostbeacon/agent/internal/hugepages"
 	"github.com/iwaneo/hostbeacon/agent/internal/version"
 )
 
@@ -70,6 +71,9 @@ func serve(args []string) error {
 	actionLog := flags.String("action-log", helper.DefaultActionLogDir, "the Action log directory")
 	flags.Parse(args)
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if err := hugepages.Disable(); err != nil {
+		log.Warn("cannot turn off transparent huge pages", "error", err)
+	}
 
 	if os.Geteuid() != 0 {
 		return errors.New("must run as root")
