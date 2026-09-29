@@ -4,7 +4,10 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
 )
 
 func load(t *testing.T, content string) (Config, error) {
@@ -27,6 +30,12 @@ func TestDefaultsAllowOnlyPrivateRanges(t *testing.T) {
 	}
 	if c.Port != DefaultPort {
 		t.Errorf("port = %d, want %d", c.Port, DefaultPort)
+	}
+	if len(c.EnabledActions) != 0 {
+		t.Errorf("enabled actions = %v, want none: every Action is off until the owner turns it on", c.EnabledActions)
+	}
+	if !c.PackageListRefresh {
+		t.Error("package list refresh is off, want on by default")
 	}
 	for _, address := range []string{"10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.5", "127.0.0.1", "::1", "fd00::1", "fe80::1", "::ffff:192.168.1.5"} {
 		if !allows(c, address) {
@@ -56,6 +65,55 @@ func TestOwnerCanSetAddressesAndPort(t *testing.T) {
 	}
 }
 
+func TestOwnerCanEnableActionsAndTurnOffRefresh(t *testing.T) {
+	c, err := load(t, `{"format": 1, "enabled_actions": ["reboot", "agent_update"], "package_list_refresh": false}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.EnabledActions, []protocol.Action{protocol.ActionReboot, protocol.ActionAgentUpdate}) {
+		t.Errorf("enabled actions = %v", c.EnabledActions)
+	}
+	if c.PackageListRefresh {
+		t.Error("package list refresh is on, want off")
+	}
+}
+
+func TestActionFromALaterReleaseIsNotEnabled(t *testing.T) {
+	// After a rollback, the config may name an Action this release does not
+	// know. It stays off, and the rest of the config still works.
+	c, err := load(t, `{"format": 1, "enabled_actions": ["reboot", "shutdown"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(c.EnabledActions, []protocol.Action{protocol.ActionReboot}) {
+		t.Errorf("enabled actions = %v, want only reboot", c.EnabledActions)
+	}
+}
+
+func TestRootOwnedRefusesAFileOthersCanChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"format": 1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() != 0 {
+		// The test user owns the file, not root.
+		if _, err := LoadRootOwned(path); err == nil {
+			t.Error("a file not owned by root is accepted")
+		}
+		return
+	}
+	if _, err := LoadRootOwned(path); err != nil {
+		t.Fatalf("a root-owned file is refused: %v", err)
+	}
+	if err := os.Chmod(path, 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRootOwned(path); err == nil {
+		t.Error("a group-writable file is accepted")
+	}
+}
+
 func TestEmptyListAllowsNothing(t *testing.T) {
 	c, err := load(t, `{"format": 1, "allowed_sources": []}`)
 	if err != nil {
@@ -73,6 +131,7 @@ func TestConfigThatCannotBeReadFailsClosed(t *testing.T) {
 		"unknown format": `{"format": 2}`,
 		"bad address":    `{"format": 1, "allowed_sources": ["everyone"]}`,
 		"bad port":       `{"format": 1, "port": 70000}`,
+		"refresh text":   `{"format": 1, "package_list_refresh": "no"}`,
 	} {
 		if _, err := load(t, content); err == nil {
 			t.Errorf("%s: no error", name)

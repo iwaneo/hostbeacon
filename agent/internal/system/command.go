@@ -1,21 +1,10 @@
 package system
 
-import (
-	"context"
-	"os/exec"
-	"time"
-)
+import "github.com/iwaneo/hostbeacon/agent/internal/command"
 
-const commandTimeout = 2 * time.Minute
+// Command runs a program without a shell and returns its standard output.
+type Command = command.Command
 
 // Exec runs programs with the given environment, without a shell, and
 // stops them after 2 minutes.
-func Exec(env []string) Command {
-	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(ctx, commandTimeout)
-		defer cancel()
-		command := exec.CommandContext(ctx, name, args...)
-		command.Env = env
-		return command.Output()
-	}
-}
+func Exec(env []string) Command { return command.Exec(env) }

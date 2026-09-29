@@ -18,15 +18,23 @@ type ServiceSource interface {
 // a change signal, and every fullEvery. Reads are at least minGap apart, so a
 // burst of signals gives at most one delta per minGap.
 func WatchFailedServices(ctx context.Context, source ServiceSource, minGap, fullEvery time.Duration, publish func(protocol.NameList)) {
-	var last time.Time
-	check := func() {
+	watch(ctx, source.Changes(), minGap, fullEvery, func() {
 		names, err := source.Failed(ctx)
-		last = time.Now()
 		if ctx.Err() == nil {
 			publish(nameList(names, err))
 		}
+	})
+}
+
+// watch calls check at start, after a change signal, and every fullEvery,
+// until ctx ends. Checks are at least minGap apart.
+func watch(ctx context.Context, changes <-chan struct{}, minGap, fullEvery time.Duration, check func()) {
+	var last time.Time
+	run := func() {
+		check()
+		last = time.Now()
 	}
-	check()
+	run()
 	full := time.NewTicker(fullEvery)
 	defer full.Stop()
 	var wait <-chan time.Time
@@ -41,11 +49,11 @@ func WatchFailedServices(ctx context.Context, source ServiceSource, minGap, full
 			return
 		case <-full.C:
 			request()
-		case <-source.Changes():
+		case <-changes:
 			request()
 		case <-wait:
 			wait = nil
-			check()
+			run()
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/iwaneo/hostbeacon/agent/internal/helper"
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
 )
 
@@ -18,6 +19,8 @@ const (
 	CapabilityNetwork          = "network"
 	CapabilityFailedServices   = "failed_services"
 	CapabilityAvailableUpdates = "available_updates"
+	CapabilitySmart            = "smart"
+	CapabilityContainers       = "containers"
 )
 
 // Intervals says how often each group is read (v1 spec §4.6).
@@ -26,6 +29,10 @@ type Intervals struct {
 	// Failed services: at most one read per ServicesGap after a change
 	// signal, and a full check every ServicesFull.
 	ServicesGap, ServicesFull time.Duration
+	// SMART is read every Smart. Containers are read like failed services;
+	// when the event stream fails, it starts again after ContainersRetry.
+	Smart                                          time.Duration
+	ContainersGap, ContainersFull, ContainersRetry time.Duration
 }
 
 // DefaultIntervals are the v1 intervals.
@@ -38,6 +45,10 @@ var DefaultIntervals = Intervals{
 	AvailableUpdates: 15 * time.Minute,
 	ServicesGap:      10 * time.Second,
 	ServicesFull:     60 * time.Second,
+	Smart:            time.Hour,
+	ContainersGap:    10 * time.Second,
+	ContainersFull:   60 * time.Second,
+	ContainersRetry:  30 * time.Second,
 }
 
 // Host is what the Agent found on this Host at start: its environment and
@@ -54,16 +65,19 @@ type Host struct {
 	Capabilities []string
 
 	services       ServiceSource
+	helper         RootHelper
+	smartDisks     []helper.SmartDisk // the first SMART read
 	cpu            CPUTemperature
 	packageManager string
 	lastBoot       *string
 }
 
 // Detect finds the environment and every data source. services is nil
-// when systemd cannot be reached over D-Bus. In a container, load and CPU
-// temperature show the hypervisor's values, so they are left out.
-func Detect(ctx context.Context, root string, run Command, statfs func(string) (FSSize, error), services ServiceSource, now func() time.Time) *Host {
-	h := &Host{Root: root, Run: run, Statfs: statfs, Now: now, Release: ReadOSRelease(root), Kernel: Kernel(root), Capabilities: []string{}, services: services}
+// when systemd cannot be reached over D-Bus; rootHelper is nil without the
+// root helper. In a container, load, CPU temperature, and SMART show the
+// hypervisor's values, so they are left out.
+func Detect(ctx context.Context, root string, run Command, statfs func(string) (FSSize, error), services ServiceSource, rootHelper RootHelper, now func() time.Time) *Host {
+	h := &Host{Root: root, Run: run, Statfs: statfs, Now: now, Release: ReadOSRelease(root), Kernel: Kernel(root), Capabilities: []string{}, services: services, helper: rootHelper}
 	h.Environment, h.Container = DetectEnvironment(ctx, run)
 	h.lastBoot = LastBoot(root, h.Container, now())
 	if !h.Container && exists(filepath.Join(root, "proc", "loadavg")) {
@@ -85,6 +99,16 @@ func Detect(ctx context.Context, root string, run Command, statfs func(string) (
 	if h.packageManager = DetectPackageManager(root); h.packageManager != "" {
 		h.Capabilities = append(h.Capabilities, CapabilityAvailableUpdates)
 	}
+	if rootHelper != nil {
+		// SMART only with physical disks; a VM's virtual disks have none.
+		if disks, err := rootHelper.ReadSmart(ctx); err == nil && len(disks) > 0 && !h.Container {
+			h.smartDisks = disks
+			h.Capabilities = append(h.Capabilities, CapabilitySmart)
+		}
+		if containers, err := rootHelper.ReadContainers(ctx); err == nil && len(containers.Engines) > 0 {
+			h.Capabilities = append(h.Capabilities, CapabilityContainers)
+		}
+	}
 	return h
 }
 
@@ -101,6 +125,7 @@ type Collector struct {
 	system    *Sampler
 	network   *NetworkSampler
 	disks     *DiskSampler
+	smart     *SmartSampler
 }
 
 // NewCollector makes a Collector and takes the first CPU and network
@@ -114,6 +139,7 @@ func NewCollector(host *Host, intervals Intervals, agent protocol.AgentInfo) *Co
 		system:    NewSampler(host.Root, host.has(CapabilityLoad)),
 		network:   NewNetworkSampler(host.Root, host.Container, host.Now),
 		disks:     NewDiskSampler(host.Root, host.Statfs),
+		smart:     &SmartSampler{helper: host.helper},
 	}
 	c.system.Sample()
 	c.network.Sample()
@@ -139,6 +165,13 @@ func (c *Collector) Sample(ctx context.Context) protocol.Groups {
 	if c.host.has(CapabilityFailedServices) {
 		names, err := c.host.services.Failed(ctx)
 		groups.FailedServices = ptr(nameList(names, err))
+	}
+	if c.host.has(CapabilitySmart) {
+		groups.Smart = c.smart.group(c.host.smartDisks)
+	}
+	if c.host.has(CapabilityContainers) {
+		containers, err := c.host.helper.ReadContainers(ctx)
+		groups.Containers = ptr(containersGroup(containers, err))
 	}
 	return groups
 }
@@ -178,6 +211,14 @@ func (c *Collector) Run(ctx context.Context, publish func(protocol.Groups)) {
 	if c.host.has(CapabilityFailedServices) {
 		go WatchFailedServices(ctx, c.host.services, c.intervals.ServicesGap, c.intervals.ServicesFull, func(list protocol.NameList) {
 			publish(protocol.Groups{FailedServices: &list})
+		})
+	}
+	if c.host.has(CapabilitySmart) {
+		every(c.intervals.Smart, func() protocol.Groups { return protocol.Groups{Smart: c.smart.Sample(ctx)} })
+	}
+	if c.host.has(CapabilityContainers) {
+		go WatchContainers(ctx, c.host.helper, c.intervals.ContainersGap, c.intervals.ContainersFull, c.intervals.ContainersRetry, func(group protocol.Containers) {
+			publish(protocol.Groups{Containers: &group})
 		})
 	}
 }

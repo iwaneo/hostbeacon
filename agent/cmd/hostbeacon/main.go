@@ -9,12 +9,16 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"os/user"
 	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/iwaneo/hostbeacon/agent/internal/config"
+	"github.com/iwaneo/hostbeacon/agent/internal/helper"
 	"github.com/iwaneo/hostbeacon/agent/internal/identity"
 	"github.com/iwaneo/hostbeacon/agent/internal/pairing"
 	"github.com/iwaneo/hostbeacon/agent/internal/protocol"
@@ -81,8 +85,14 @@ func serve(args []string) error {
 	configPath := flags.String("config", config.DefaultPath, "the Host config file")
 	stateDir := flags.String("state-dir", defaultStateDir, "the Agent's state directory")
 	cacheDir := flags.String("cache-dir", defaultCacheDir, "a directory the package manager may use for its cache")
+	helperSocket := flags.String("helper", helper.DefaultSocket, "the root helper's socket")
 	flags.Parse(args)
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	// These groups would give the network part root's reach (v1 spec §4.1).
+	if groups := forbiddenGroups(groupNames()); len(groups) > 0 {
+		return fmt.Errorf("the Agent user must not be in the group %s", strings.Join(groups, ", "))
+	}
 
 	// Fail closed: without a readable Host config, accept no connections.
 	hostConfig, err := config.Load(*configPath)
@@ -110,7 +120,10 @@ func serve(args []string) error {
 		defer systemd.Close()
 		services = systemd
 	}
-	host := system.Detect(ctx, "/", run, system.Statfs, services, time.Now)
+	if _, err := os.Stat(*helperSocket); err != nil {
+		log.Warn("cannot reach the root helper, so SMART and containers are not shown", "error", err)
+	}
+	host := system.Detect(ctx, "/", run, system.Statfs, services, helper.Client{Socket: *helperSocket}, time.Now)
 	hostname, _ := os.Hostname()
 	agent := protocol.AgentInfo{
 		Hostname:       hostname,
@@ -153,6 +166,27 @@ func serve(args []string) error {
 	}
 	log.Info("listening", "port", hostConfig.Port, "instance_id", id.InstanceID, "fingerprint", fmt.Sprintf("%x", id.Fingerprint))
 	return s.Serve(ctx, listener)
+}
+
+// forbiddenGroups returns the groups in names that give access to Docker,
+// raw disks, or all logs.
+func forbiddenGroups(names []string) []string {
+	return slices.DeleteFunc(slices.Clone(names), func(name string) bool {
+		return !slices.Contains([]string{"docker", "disk", "adm"}, name)
+	})
+}
+
+// groupNames are the names of this process's groups.
+func groupNames() []string {
+	gids, _ := os.Getgroups()
+	gids = append(gids, os.Getegid())
+	var names []string
+	for _, gid := range gids {
+		if group, err := user.LookupGroupId(strconv.Itoa(gid)); err == nil {
+			names = append(names, group.Name)
+		}
+	}
+	return names
 }
 
 // optional is null for empty text.

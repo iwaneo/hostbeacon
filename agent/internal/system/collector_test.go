@@ -38,7 +38,7 @@ func detect(t *testing.T, root, virt string, services ServiceSource) *Host {
 	}.run
 	statfs := func(string) (FSSize, error) { return FSSize{Total: 1000, Free: 500, Available: 500}, nil }
 	now := func() time.Time { return time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC) }
-	return Detect(context.Background(), root, run, statfs, services, now)
+	return Detect(context.Background(), root, run, statfs, services, nil, now)
 }
 
 var agentInfo = protocol.AgentInfo{Hostname: "old-name", AgentVersion: "0.1.0", Capabilities: []string{}, EnabledActions: []protocol.Action{}}

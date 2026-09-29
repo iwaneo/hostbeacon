@@ -21,15 +21,14 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
 from . import HostbeaconConfigEntry
 from .connection import HostConnection
-from .const import DOMAIN
-from .protocol import Interface, Mount
+from .entity import HostEntity
+from .protocol import Containers, Interface, Mount, SmartDisk
 
 HOST_STATUS_OPTIONS = ["online", "updating", "rebooting", "offline"]
 REBOOT_REQUIRED_OPTIONS = ["yes", "no"]
@@ -169,6 +168,21 @@ CAPABILITY_SENSORS = (
         value=lambda c: c.groups.failed_services.count if c.groups.failed_services else None,
         attributes=lambda c: {"services": c.groups.failed_services.names if c.groups.failed_services else []},
     ),
+    *(
+        HostSensorDescription(
+            key=f"containers_{container_state}",
+            translation_key=f"containers_{container_state}",
+            state_class=SensorStateClass.MEASUREMENT,
+            exists=_has("containers"),
+            value=lambda c, container_state=container_state: (
+                getattr(c.groups.containers, container_state) if c.groups.containers else None
+            ),
+            attributes=lambda c, container_state=container_state: {
+                "containers": _container_names(c.groups.containers, container_state)
+            },
+        )
+        for container_state in ("running", "stopped", "unhealthy")
+    ),
     HostSensorDescription(
         key="available_updates",
         translation_key="available_updates",
@@ -177,6 +191,15 @@ CAPABILITY_SENSORS = (
         value=lambda c: c.groups.available_updates.count if c.groups.available_updates else None,
     ),
 )
+
+
+def _container_names(containers: Containers | None, container_state: str) -> list[str]:
+    return [item.name for item in containers.items if item.state == container_state] if containers else []
+
+
+def smart_disk(connection: HostConnection, device: str) -> SmartDisk | None:
+    smart = connection.groups.smart if "smart" in connection.capabilities else None
+    return next((disk for disk in smart.disks if disk.device == device), None) if smart else None
 
 
 def _mount(connection: HostConnection, path: str) -> Mount | None:
@@ -251,6 +274,37 @@ def _interface_sensors(name: str) -> Iterator[HostSensorDescription]:
         )
 
 
+def _smart_sensors(disk: SmartDisk) -> Iterator[HostSensorDescription]:
+    device = disk.device
+
+    def exists(connection: HostConnection) -> bool:
+        return smart_disk(connection, device) is not None
+
+    yield HostSensorDescription(
+        key=f"disk_temperature_{device}",
+        translation_key="disk_temperature",
+        translation_placeholders={"device": device},
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        exists=exists,
+        value=lambda c: item.temperature_celsius if (item := smart_disk(c, device)) else None,
+    )
+    # Wear only for SSDs: other disks never report it.
+    if disk.wear_percent is not None:
+        yield HostSensorDescription(
+            key=f"disk_wear_{device}",
+            translation_key="disk_wear",
+            translation_placeholders={"device": device},
+            native_unit_of_measurement=PERCENTAGE,
+            state_class=SensorStateClass.MEASUREMENT,
+            suggested_display_precision=0,
+            exists=exists,
+            value=lambda c: item.wear_percent if (item := smart_disk(c, device)) else None,
+        )
+
+
 def _descriptions(connection: HostConnection) -> Iterator[HostSensorDescription]:
     """Every sensor the Host has now: fixed ones, then one per capability, mount, and interface."""
     yield from SYSTEM_SENSORS
@@ -261,6 +315,9 @@ def _descriptions(connection: HostConnection) -> Iterator[HostSensorDescription]
     if "network" in connection.capabilities and connection.groups.network:
         for item in connection.groups.network.interfaces:
             yield from _interface_sensors(item.name)
+    if "smart" in connection.capabilities and connection.groups.smart:
+        for disk in connection.groups.smart.disks:
+            yield from _smart_sensors(disk)
 
 
 async def async_setup_entry(
@@ -281,28 +338,7 @@ async def async_setup_entry(
     entry.async_on_unload(connection.add_listener(add_new_sensors))
 
 
-class HostEntity(SensorEntity):
-    """An entity of one Host. Unavailable while the Host is Offline."""
-
-    _attr_has_entity_name = True
-    _attr_should_poll = False
-
-    def __init__(self, entry: HostbeaconConfigEntry, connection: HostConnection, key: str) -> None:
-        self._connection = connection
-        # Entity unique IDs are <Host ID>_<entity key>.
-        self._attr_unique_id = f"{entry.unique_id}_{key}"
-        # The device is made and kept up to date in __init__.py.
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.unique_id)})
-
-    async def async_added_to_hass(self) -> None:
-        self.async_on_remove(self._connection.add_listener(self.async_write_ha_state))
-
-    @property
-    def available(self) -> bool:
-        return self._connection.online
-
-
-class HostStatusSensor(HostEntity):
+class HostStatusSensor(HostEntity, SensorEntity):
     """Host status. Always available, so it can show Offline."""
 
     _attr_device_class = SensorDeviceClass.ENUM
@@ -321,7 +357,7 @@ class HostStatusSensor(HostEntity):
         return "online" if self._connection.online else "offline"
 
 
-class LastSeenSensor(HostEntity):
+class LastSeenSensor(HostEntity, SensorEntity):
     """When the Agent was last seen. Always available, so it shows when an Offline Host was last there."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -341,12 +377,12 @@ class LastSeenSensor(HostEntity):
         return self._connection.last_seen
 
 
-class HostSensor(HostEntity):
+class HostSensor(HostEntity, SensorEntity):
     """A value from the Host's latest state."""
 
     entity_description: HostSensorDescription
-    # Names of services never go into HA history (v1 spec §7.4).
-    _unrecorded_attributes = frozenset({"services"})
+    # Names of services and containers never go into HA history (v1 spec §7.4).
+    _unrecorded_attributes = frozenset({"services", "containers"})
 
     def __init__(
         self, entry: HostbeaconConfigEntry, connection: HostConnection, description: HostSensorDescription

@@ -16,7 +16,7 @@ from .connection import HostConnection
 from .const import CONF_FINGERPRINT, CONF_KEY, DOMAIN
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 type HostbeaconConfigEntry = ConfigEntry[HostConnection]
 

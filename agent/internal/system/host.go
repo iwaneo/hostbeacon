@@ -12,9 +12,6 @@ import (
 	"unicode"
 )
 
-// Command runs a program without a shell and returns its standard output.
-type Command func(ctx context.Context, name string, args ...string) ([]byte, error)
-
 // containerTypes are the systemd-detect-virt answers for a container.
 var containerTypes = []string{"lxc", "lxc-libvirt", "systemd-nspawn", "docker", "podman", "rkt", "wsl", "proot", "pouch", "openvz"}
 
