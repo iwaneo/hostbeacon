@@ -1,1 +1,58 @@
-{}
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a Host",
+        "description": "Enter the address of a Host that has the Hostbeacon Agent installed.",
+        "data": {
+          "host": "Address",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "IP address or hostname of the Host.",
+          "port": "The Agent's port. Change it only if the Host owner changed it."
+        }
+      },
+      "pair": {
+        "title": "Pair with {host}",
+        "description": "On the Host, run `sudo hostbeacon pair`. Enter the Pairing code it shows.",
+        "data": {
+          "code": "Pairing code"
+        },
+        "data_description": {
+          "code": "12 characters, for example K7QM-4XPT-9RWD. It works once, for 10 minutes."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the Agent at this address. Check the address and the port, and that the Agent is running.",
+      "invalid_code": "The Pairing code is wrong, expired, or already used. Make a new code on the Host and try again.",
+      "pairing_failed": "Pairing failed: the Agent did not prove that it knows the code. Check that this is the address of the right Host."
+    },
+    "abort": {
+      "already_configured": "This Host is already added."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "host_status": {
+        "name": "Host status",
+        "state": {
+          "online": "Online",
+          "updating": "Updating",
+          "rebooting": "Rebooting",
+          "offline": "Offline"
+        }
+      },
+      "cpu_usage": {
+        "name": "CPU usage"
+      },
+      "memory_usage": {
+        "name": "Memory usage"
+      },
+      "swap_usage": {
+        "name": "Swap usage"
+      }
+    }
+  }
+}
