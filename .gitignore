@@ -14,3 +14,4 @@ __pycache__/
 .mcp.json
 CLAUDE.md
 TASKS.md
+.claude/scheduled_tasks*
