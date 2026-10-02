@@ -22,8 +22,8 @@ import (
 // updates group.
 const DefaultPackageListStamp = "/var/lib/hostbeacon-helper/package-list-refreshed"
 
-// PackageListMaxAge: the list is refreshed only when it is older (v1 spec
-// §4.6).
+// PackageListMaxAge: without a refresh time, the list is refreshed only when
+// it is older (v1 spec §4.6).
 const PackageListMaxAge = 24 * time.Hour
 
 // RefreshResult says what a package list refresh did.
@@ -31,7 +31,7 @@ type RefreshResult string
 
 const (
 	RefreshDone         RefreshResult = "refreshed"
-	RefreshFresh        RefreshResult = "fresh"         // refreshed less than 24 hours ago
+	RefreshFresh        RefreshResult = "fresh"         // refreshed less than 24 hours ago, or since the refresh time
 	RefreshBusy         RefreshResult = "busy"          // a package task or the package manager holds its lock
 	RefreshOff          RefreshResult = "off"           // turned off in the Host config
 	RefreshNotSupported RefreshResult = "not_supported" // no apt or dnf
@@ -50,8 +50,8 @@ type PackageListRefresh struct {
 	Now                    func() time.Time
 }
 
-// Refresh refreshes the list if it is on, older than 24 hours, and no
-// package task or package manager holds its lock. It takes the package-task
+// Refresh refreshes the list if it is on, not fresh, and no package task or
+// package manager holds its lock. It takes the package-task
 // lock for the whole refresh.
 func (p PackageListRefresh) Refresh(ctx context.Context, cfg config.Config) (RefreshResult, error) {
 	if !cfg.PackageListRefresh {
@@ -70,7 +70,7 @@ func (p PackageListRefresh) Refresh(ctx context.Context, cfg config.Config) (Ref
 	}
 	now := p.Now()
 	// A stamp from the future (the clock went back) is not trusted.
-	if last, ok := ReadPackageListStamp(p.Stamp); ok && !last.After(now) && now.Sub(last) < PackageListMaxAge {
+	if last, ok := ReadPackageListStamp(p.Stamp); ok && !last.After(now) && fresh(cfg, last, now) {
 		return RefreshFresh, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(p.PackageTaskLock), 0o755); err != nil {
@@ -98,6 +98,23 @@ func (p PackageListRefresh) Refresh(ctx context.Context, cfg config.Config) (Ref
 		return "", err
 	}
 	return RefreshDone, nil
+}
+
+// fresh says whether a list refreshed at last needs no refresh at now (v1
+// spec §4.6). Without a refresh time, a list is fresh for 24 hours. With
+// one, it is fresh until that hour comes again in now's time zone, so a
+// missed refresh runs at the next check.
+func fresh(cfg config.Config, last, now time.Time) bool {
+	hour, ok := cfg.RefreshHour()
+	if !ok {
+		return now.Sub(last) < PackageListMaxAge
+	}
+	year, month, day := now.Date()
+	due := time.Date(year, month, day, hour, 0, 0, 0, now.Location())
+	if now.Before(due) {
+		due = time.Date(year, month, day-1, hour, 0, 0, 0, now.Location())
+	}
+	return !last.Before(due)
 }
 
 const stampFormat = 1

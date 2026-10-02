@@ -4,7 +4,7 @@ The contract between the Agent and the Integration. Rules:
 [v1 spec §6](../docs/spec/v1.md#6-protocol).
 
 - `schema.json`: one JSON Schema for every message. Protocol version
-  `x-protocol-version` (major.minor, now 1.0).
+  `x-protocol-version` (major.minor, now 1.2).
 - `examples/`: shared examples. The Agent (`agent/internal/protocol`) and the
   Integration (`custom_components/hostbeacon/protocol.py`) both run all of them
   in their tests.

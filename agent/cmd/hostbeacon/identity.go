@@ -36,6 +36,9 @@ type owner struct {
 	run command.Command
 	// tailscale says whether Tailscale is on this Host.
 	tailscale func() bool
+	// packageManager says whether apt or dnf is on this Host, so the
+	// package list refresh can run.
+	packageManager func() bool
 }
 
 func systemOwner() owner {
@@ -54,6 +57,7 @@ func systemOwner() owner {
 			_, statErr := os.Stat("/sys/class/net/tailscale0")
 			return err == nil || statErr == nil
 		},
+		packageManager: func() bool { return helper.DetectPackageManager("/") != "" },
 	}
 }
 

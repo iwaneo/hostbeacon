@@ -1,14 +1,15 @@
-# Checks every hour. The refresh runs only when the last one is older than
-# 24 hours, so the list is refreshed once a day, and a turn skipped for a
-# held lock is tried again an hour later.
+# Checks on the hour. The refresh runs only when the list is not fresh: older
+# than 24 hours, or, with a refresh time in the Host config, older than that
+# hour's last turn (v1 spec §4.6). A turn skipped for a held lock or while the
+# Host was off is tried again at the next check.
 [Unit]
 Description=Hostbeacon package list refresh, once a day
 Documentation=https://github.com/iwaneo/hostbeacon
 
 [Timer]
 OnBootSec=15min
-OnUnitInactiveSec=1h
-RandomizedDelaySec=10min
+OnCalendar=hourly
+RandomizedDelaySec=5min
 
 [Install]
 WantedBy=timers.target

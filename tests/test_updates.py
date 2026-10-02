@@ -30,9 +30,14 @@ def updates(
     packages: list[protocol.Package] = PACKAGES,
     fingerprint: str | None = FINGERPRINT,
     last_refresh: str | None = None,
+    refresh_schedule: str | None = None,
 ) -> protocol.AvailableUpdates:
     return protocol.AvailableUpdates(
-        count=count, packages=packages if count else [], fingerprint=fingerprint, last_refresh=last_refresh
+        count=count,
+        packages=packages if count else [],
+        fingerprint=fingerprint,
+        last_refresh=last_refresh,
+        refresh_schedule=refresh_schedule,
     )
 
 
@@ -142,6 +147,19 @@ async def test_release_notes_without_updates_or_refresh(
     assert "**Reboot required:** No" in notes
     assert "**Package list refreshed:** Not yet by Hostbeacon" in notes
     assert "turned off" not in notes
+    # An Agent before protocol 1.2 sends no refresh schedule.
+    assert "Package list refresh:" not in notes
+
+
+async def test_refresh_schedule_in_release_notes(hass: HomeAssistant, agent: FakeAgent, hass_ws_client) -> None:
+    for schedule, line in [
+        ("03:00", "**Package list refresh:** Daily at 03:00, the Host's local time"),
+        ("every_24h", "**Package list refresh:** Once every 24 hours"),
+        ("off", "**Package list refresh:** Off"),
+    ]:
+        entry = await add_updates_host(hass, agent, updates(0, refresh_schedule=schedule))
+        assert line in await release_notes(hass, hass_ws_client, entry)
+        await hass.config_entries.async_remove(entry.entry_id)
 
 
 async def test_last_update_run_in_release_notes(hass: HomeAssistant, agent: FakeAgent, hass_ws_client) -> None:

@@ -231,6 +231,68 @@ func TestSetupFlagsFormNone(t *testing.T) {
 	}
 }
 
+func TestSetupAsksForTheRefreshTimeOnlyWithAPackageManager(t *testing.T) {
+	// Three Actions, then the refresh time; no Pairing code.
+	h := newSetupHost(t, "\n\n\n03:30\n3:00\nn\n", "", false)
+	h.packageManager = func() bool { return true }
+	if err := h.setup(t); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.config(t); c.RefreshTime != "03:00" {
+		t.Errorf("refresh time = %q, want 03:00", c.RefreshTime)
+	}
+	if !strings.Contains(h.output.String(), "Enter a whole hour") || !strings.Contains(h.output.String(), "refreshed daily at 03:00") {
+		t.Errorf("output:\n%s", h.output.String())
+	}
+
+	// Run again: Enter keeps it, none removes it.
+	h.in = strings.NewReader("\n\n\n\nn\n")
+	if err := h.setup(t); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.config(t); c.RefreshTime != "03:00" {
+		t.Errorf("refresh time = %q after Enter, want 03:00 kept", c.RefreshTime)
+	}
+	h.in = strings.NewReader("\n\n\nnone\nn\n")
+	if err := h.setup(t); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.config(t); c.RefreshTime != "" {
+		t.Errorf("refresh time = %q after none, want none", c.RefreshTime)
+	}
+
+	// Without apt or dnf there is no refresh, so no question.
+	h = newSetupHost(t, "\n\n\n\n", "", false)
+	if err := h.setup(t); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.output.String(), "package list") {
+		t.Errorf("setup asked about the refresh without a package manager:\n%s", h.output.String())
+	}
+}
+
+func TestSetupFlagsFormSetsTheRefreshTime(t *testing.T) {
+	h := newSetupHost(t, "", "", false)
+	if err := h.setup(t, "--actions", "reboot", "--refresh-time", "4:00"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.setup(t, "--pair"); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.config(t); c.RefreshTime != "04:00" || len(c.EnabledActions) != 1 {
+		t.Errorf("refresh time = %q, enabled actions = %v; want 04:00 and reboot kept", c.RefreshTime, c.EnabledActions)
+	}
+	if err := h.setup(t, "--refresh-time", "04:30"); err == nil {
+		t.Error("--refresh-time 04:30: no error")
+	}
+	if err := h.setup(t, "--refresh-time", "none"); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.config(t); c.RefreshTime != "" || len(c.EnabledActions) != 1 {
+		t.Errorf("refresh time = %q, enabled actions = %v; want none and reboot kept", c.RefreshTime, c.EnabledActions)
+	}
+}
+
 func TestStatusShowsActionsAndTheAgent(t *testing.T) {
 	h := newSetupHost(t, "", "", false)
 	var out bytes.Buffer

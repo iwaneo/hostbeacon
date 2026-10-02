@@ -132,6 +132,9 @@ type AvailableUpdates struct {
 	Packages    []Package `json:"packages" max:"100"`
 	Fingerprint *string   `json:"fingerprint"`
 	LastRefresh *string   `json:"last_refresh" format:"time"`
+	// RefreshSchedule is off, every_24h, or the hour of the daily refresh,
+	// such as 03:00 (v1 spec §4.6). Since 1.2.
+	RefreshSchedule *string `json:"refresh_schedule,omitempty" format:"refresh_schedule"`
 }
 
 // UpdateRun is the Update run record kept on the Host.

@@ -25,7 +25,7 @@ from typing import (
     get_type_hints,
 )
 
-PROTOCOL_VERSION = "1.1"
+PROTOCOL_VERSION = "1.2"
 PROTOCOL_MAJORS = [1]
 
 Kind = Literal["request", "reply", "event"]
@@ -63,7 +63,7 @@ class _Size:
     min_keys: int | None = None
 
 
-# The same rules as the uuid and time patterns in schema.json.
+# The same rules as the uuid, time, and refresh_schedule patterns in schema.json.
 Uuid = Annotated[
     str,
     _Pattern("a lowercase UUID", re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")),
@@ -71,6 +71,11 @@ Uuid = Annotated[
 Time = Annotated[
     str,
     _Pattern("a UTC time ending in Z", re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")),
+]
+# off, every_24h, or the hour of the daily package list refresh, such as 03:00.
+RefreshSchedule = Annotated[
+    str,
+    _Pattern("off, every_24h, or a time such as 03:00", re.compile(r"off|every_24h|([01][0-9]|2[0-3]):[0-5][0-9]")),
 ]
 # Name lists are capped at 100 items.
 CAP = _Size(max_items=100)
@@ -182,6 +187,8 @@ class AvailableUpdates:
     packages: Annotated[list[Package], CAP]
     fingerprint: str | None
     last_refresh: Time | None
+    # Since 1.2.
+    refresh_schedule: RefreshSchedule | None = field(default=None, metadata={"omit_if_none": True})
 
 
 @dataclass(frozen=True, slots=True)

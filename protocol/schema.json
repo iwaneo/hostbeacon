@@ -3,7 +3,7 @@
   "$id": "https://github.com/iwaneo/hostbeacon/protocol/schema.json",
   "title": "Hostbeacon Agent-Integration protocol",
   "description": "Every JSON text frame on the WebSocket between the Agent and the Integration. Rules: docs/spec/v1.md section 6. Unknown fields are allowed everywhere and ignored by readers. A message with an unknown type only has to match the envelope.",
-  "x-protocol-version": "1.1",
+  "x-protocol-version": "1.2",
   "$ref": "#/$defs/message",
   "$defs": {
     "message": {
@@ -345,6 +345,11 @@
         "last_refresh": {
           "description": "Time of the last successful package list refresh.",
           "$ref": "#/$defs/nullable_time"
+        },
+        "refresh_schedule": {
+          "description": "Since 1.2. When the package list is refreshed: off, every_24h, or daily at this hour of the Host's local time, such as 03:00.",
+          "type": "string",
+          "pattern": "^(off|every_24h|([01][0-9]|2[0-3]):[0-5][0-9])$"
         }
       }
     },

@@ -43,12 +43,15 @@ const (
 
 const usage = `Usage:
   hostbeacon setup    turn Actions on or off, allow Home Assistant's VPN address,
-                      open the firewall port, and pair (run as root). It asks
-                      each question. With flags it asks nothing and changes
-                      only what the flags name:
+                      set the refresh time, open the firewall port, and pair
+                      (run as root). It asks each question. With flags it asks
+                      nothing and changes only what the flags name:
                         --actions reboot,update_run,agent_update | none
                                                          (the others are turned off)
                         --vpn-address <address> | none   (unchanged if not given)
+                        --refresh-time <hour> | none     (daily package list refresh,
+                                                         such as 03:00; none: once
+                                                         every 24 hours)
                         --open-firewall                  (firewalld or ufw)
                         --pair                           (show a Pairing code)
   hostbeacon pair     show a Pairing code for Home Assistant (run as root)
@@ -296,6 +299,7 @@ func serve(args []string) error {
 	}
 	host := system.Detect(ctx, "/", run, system.Statfs, services, helper.Client{Socket: *helperSocket}, time.Now)
 	host.Tasks = tasks
+	host.RefreshSchedule = hostConfig.RefreshSchedule()
 	hostname, _ := os.Hostname()
 	agent := protocol.AgentInfo{
 		Hostname:     hostname,

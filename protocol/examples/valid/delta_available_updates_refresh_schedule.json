@@ -1,0 +1,17 @@
+{
+  "description": "Since 1.2: the package list is refreshed daily at 03:00, the Host's local time.",
+  "message": {
+    "type": "delta",
+    "id": "agent-3",
+    "kind": "event",
+    "groups": {
+      "available_updates": {
+        "count": 0,
+        "packages": [],
+        "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "last_refresh": "2026-10-02T00:03:12Z",
+        "refresh_schedule": "03:00"
+      }
+    }
+  }
+}
