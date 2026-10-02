@@ -113,6 +113,41 @@ func TestRefreshRunsOnlyWhenTheListIsOlderThan24Hours(t *testing.T) {
 	}
 }
 
+func TestRefreshRunsOnceADayAtTheRefreshTime(t *testing.T) {
+	israel := time.FixedZone("IDT", 3*60*60)
+	at := func(day, hour, minute int) time.Time { return time.Date(2026, 10, day, hour, minute, 0, 0, israel) }
+	cfg := config.Config{PackageListRefresh: true, RefreshTime: "03:00"}
+	for _, test := range []struct {
+		name      string
+		last, now time.Time
+		want      RefreshResult
+	}{
+		{"before the hour, refreshed after yesterday's", at(1, 3, 2), at(2, 2, 59), RefreshFresh},
+		{"the check on the hour", at(1, 3, 2), at(2, 3, 4), RefreshDone},
+		{"already refreshed today", at(2, 3, 4), at(2, 23, 0), RefreshFresh},
+		{"set after today's refresh by hand", at(2, 10, 0), at(2, 11, 0), RefreshFresh},
+		// The Host was off at 03:00: it catches up at the next check.
+		{"missed today", at(1, 3, 2), at(2, 9, 15), RefreshDone},
+		{"missed yesterday, before the hour", at(1, 2, 0), at(2, 1, 0), RefreshDone},
+		// The time wins over the 24 hours: all Hosts line up on the first day.
+		{"refreshed by hand 20 hours ago", at(1, 7, 0), at(2, 3, 3), RefreshDone},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := newRefresh(t, "apt")
+			r.Now = func() time.Time { return test.now }
+			writeStamp(r.Stamp, test.last)
+			result, err := r.Refresh(context.Background(), cfg)
+			wantResult(t, result, err, test.want)
+		})
+	}
+}
+
+func TestRefreshTimeIsIgnoredWhenTheRefreshIsOff(t *testing.T) {
+	r := newRefresh(t, "apt")
+	result, err := r.Refresh(context.Background(), config.Config{RefreshTime: "03:00"})
+	wantResult(t, result, err, RefreshOff)
+}
+
 func TestRefreshRunsWhenTheStampCannotBeRead(t *testing.T) {
 	r := newRefresh(t, "dnf")
 	os.WriteFile(r.Stamp, []byte("yesterday\n"), 0o644)

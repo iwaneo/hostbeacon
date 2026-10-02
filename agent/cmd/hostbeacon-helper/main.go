@@ -26,7 +26,7 @@ import (
 
 const usage = `Usage:
   hostbeacon-helper serve                 run the root helper (systemd starts it as root)
-  hostbeacon-helper refresh-package-list  refresh the package list if it is older than 24 hours
+  hostbeacon-helper refresh-package-list  refresh the package list once a day (at the refresh time, if set)
                                           (the root timer runs it)
   hostbeacon-helper update-run            run the Update run the helper accepted
                                           (the Update run unit runs it)

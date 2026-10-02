@@ -19,7 +19,7 @@ import (
 )
 
 // Version is the protocol version this Agent speaks, as major.minor.
-const Version = "1.1"
+const Version = "1.2"
 
 // Majors lists every protocol major this Agent supports.
 var Majors = []int{1}
@@ -58,9 +58,11 @@ type rules interface {
 }
 
 var formats = map[string]*regexp.Regexp{
-	// The same rules as the uuid and time patterns in schema.json.
-	"uuid": regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`),
-	"time": regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$`),
+	// The same rules as the uuid, time, and refresh_schedule patterns in
+	// schema.json.
+	"uuid":             regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`),
+	"time":             regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$`),
+	"refresh_schedule": regexp.MustCompile(`^(off|every_24h|([01][0-9]|2[0-3]):[0-5][0-9])$`),
 }
 
 // Decode reads one frame.

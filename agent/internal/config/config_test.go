@@ -79,6 +79,55 @@ func TestOwnerCanEnableActionsAndTurnOffRefresh(t *testing.T) {
 	}
 }
 
+func TestOwnerCanSetARefreshTime(t *testing.T) {
+	c, err := load(t, `{"format": 1}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.RefreshHour(); ok || c.RefreshTime != "" {
+		t.Errorf("refresh time = %q, want none by default", c.RefreshTime)
+	}
+	if c, err = load(t, `{"format": 1, "refresh_time": "3:00"}`); err != nil {
+		t.Fatal(err)
+	}
+	if hour, ok := c.RefreshHour(); !ok || hour != 3 || c.RefreshTime != "03:00" {
+		t.Errorf("refresh time = %q, hour %d, %v: want 03:00", c.RefreshTime, hour, ok)
+	}
+	// A bad time fails closed, like every other config error.
+	if _, err := load(t, `{"format": 1, "refresh_time": "03:30"}`); err == nil {
+		t.Error("refresh time 03:30: no error")
+	}
+}
+
+func TestRefreshSchedule(t *testing.T) {
+	for text, want := range map[string]string{
+		`{"format": 1}`:                          "every_24h",
+		`{"format": 1, "refresh_time": "03:00"}`: "03:00",
+		`{"format": 1, "refresh_time": "03:00", "package_list_refresh": false}`: "off",
+	} {
+		c, err := load(t, text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.RefreshSchedule(); got != want {
+			t.Errorf("%s: schedule %q, want %q", text, got, want)
+		}
+	}
+}
+
+func TestRefreshTimeIsAWholeHour(t *testing.T) {
+	for text, want := range map[string]string{"03:00": "03:00", "3:00": "03:00", " 23:00 ": "23:00", "0:00": "00:00"} {
+		if got, err := ParseRefreshTime(text); err != nil || got != want {
+			t.Errorf("ParseRefreshTime(%q) = %q, %v; want %q", text, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "3", "03:30", "24:00", "-1:00", "003:00", "03:00:00", "three"} {
+		if _, err := ParseRefreshTime(bad); err == nil {
+			t.Errorf("ParseRefreshTime(%q): no error", bad)
+		}
+	}
+}
+
 func TestActionFromALaterReleaseIsNotEnabled(t *testing.T) {
 	// After a rollback, the config may name an Action this release does not
 	// know. It stays off, and the rest of the config still works.
@@ -213,9 +262,24 @@ func TestWriteSetupKeepsWhatItDoesNotSet(t *testing.T) {
 		t.Errorf("a field from a later release was dropped:\n%s", data)
 	}
 
-	// An empty VPN address removes it.
+	// A refresh time is set, and kept when not given.
+	refreshTime := "04:00"
+	if err := WriteSetup(path, Setup{EnabledActions: []protocol.Action{protocol.ActionUpdateRun}, RefreshTime: &refreshTime}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSetup(path, Setup{EnabledActions: []protocol.Action{protocol.ActionUpdateRun}}); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if c.RefreshTime != "04:00" {
+		t.Errorf("refresh time = %q, want 04:00 kept", c.RefreshTime)
+	}
+
+	// An empty VPN address or refresh time removes it.
 	empty := ""
-	if err := WriteSetup(path, Setup{VPNAddress: &empty}); err != nil {
+	if err := WriteSetup(path, Setup{VPNAddress: &empty, RefreshTime: &empty}); err != nil {
 		t.Fatal(err)
 	}
 	if c, err = Load(path); err != nil {
@@ -223,6 +287,9 @@ func TestWriteSetupKeepsWhatItDoesNotSet(t *testing.T) {
 	}
 	if allows(c, "100.64.1.2") || len(c.EnabledActions) != 0 {
 		t.Errorf("VPN address allowed = %v, enabled actions = %v: want neither", allows(c, "100.64.1.2"), c.EnabledActions)
+	}
+	if c.RefreshTime != "" {
+		t.Errorf("refresh time = %q, want none", c.RefreshTime)
 	}
 }
 
@@ -235,6 +302,10 @@ func TestWriteSetupRefusesWhatLoadWouldRefuse(t *testing.T) {
 		if err := WriteSetup(path, Setup{VPNAddress: &bad}); err == nil {
 			t.Errorf("VPN address %q: no error", bad)
 		}
+	}
+	badTime := "03:30"
+	if err := WriteSetup(path, Setup{RefreshTime: &badTime}); err == nil {
+		t.Error("refresh time 03:30: no error")
 	}
 	if err := WriteSetup(path, Setup{EnabledActions: []protocol.Action{"shutdown"}}); err == nil {
 		t.Error("unknown Action: no error")

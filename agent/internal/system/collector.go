@@ -70,6 +70,9 @@ type Host struct {
 	Capabilities []string
 	// Tasks is nil when systemd cannot be reached over D-Bus.
 	Tasks PackageTasks
+	// RefreshSchedule is when the package list is refreshed, from the Host
+	// config; empty when unknown.
+	RefreshSchedule string
 
 	services       ServiceSource
 	helper         RootHelper
@@ -365,6 +368,9 @@ func (c *Collector) availableUpdates(ctx context.Context) *protocol.AvailableUpd
 		updates = protocol.AvailableUpdates{Packages: []protocol.Package{}}
 	}
 	updates.LastRefresh = c.lastRefresh()
+	if c.host.RefreshSchedule != "" {
+		updates.RefreshSchedule = ptr(c.host.RefreshSchedule)
+	}
 	return &updates
 }
 

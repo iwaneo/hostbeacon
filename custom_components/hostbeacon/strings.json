@@ -351,6 +351,15 @@
     "release_notes_list_never": {
       "message": "**Package list refreshed:** Not yet by Hostbeacon"
     },
+    "release_notes_schedule_daily": {
+      "message": "**Package list refresh:** Daily at {time}, the Host's local time"
+    },
+    "release_notes_schedule_every_24h": {
+      "message": "**Package list refresh:** Once every 24 hours"
+    },
+    "release_notes_schedule_off": {
+      "message": "**Package list refresh:** Off"
+    },
     "release_notes_update_run_off": {
       "message": "Update run is turned off on {host}, so Install is not offered. The Host owner can turn it on with `sudo hostbeacon setup`."
     },

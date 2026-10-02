@@ -77,7 +77,8 @@ Only paired Home Assistants get Host data from the Agent. The Agent sends:
 - SMART per disk: device name (such as `sda`), health, temperature, wear;
 - failed systemd services (count and names), containers (names and states);
 - Available updates: count, a capped list of package names and versions, and
-  the time the package list was refreshed;
+  the time the package list was refreshed, and when it is refreshed (off,
+  every 24 hours, or the refresh time);
 - the Update run record, Reboot required, and whether the package system is
   broken (with the command to fix it).
 

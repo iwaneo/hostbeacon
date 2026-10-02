@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -41,6 +42,9 @@ type Config struct {
 	EnabledActions []protocol.Action
 	// PackageListRefresh is the daily package list refresh (v1 spec §4.6).
 	PackageListRefresh bool
+	// RefreshTime is the hour of the daily package list refresh in the
+	// Host's local time, such as "03:00". Empty when the owner set none.
+	RefreshTime string
 	// VPNAddress is Home Assistant's single VPN address, if the owner set
 	// one. It is in AllowedSources too.
 	VPNAddress netip.Addr
@@ -52,6 +56,7 @@ type file struct {
 	AllowedSources     *[]string         `json:"allowed_sources"`
 	EnabledActions     []protocol.Action `json:"enabled_actions"`
 	PackageListRefresh *bool             `json:"package_list_refresh"`
+	RefreshTime        *string           `json:"refresh_time"`
 	VPNAddress         *string           `json:"vpn_address"`
 }
 
@@ -115,7 +120,46 @@ func parse(data []byte) (Config, error) {
 	if f.PackageListRefresh != nil {
 		c.PackageListRefresh = *f.PackageListRefresh
 	}
+	if f.RefreshTime != nil {
+		refreshTime, err := ParseRefreshTime(*f.RefreshTime)
+		if err != nil {
+			return Config{}, fmt.Errorf("refresh_time: %w", err)
+		}
+		c.RefreshTime = refreshTime
+	}
 	return c, nil
+}
+
+// ParseRefreshTime reads a whole hour such as 03:00 or 3:00, and returns it
+// as 03:00. The timer checks on the hour, so minutes must be 00.
+func ParseRefreshTime(text string) (string, error) {
+	hour, minutes, ok := strings.Cut(strings.TrimSpace(text), ":")
+	h, err := strconv.Atoi(hour)
+	if !ok || err != nil || len(hour) > 2 || h < 0 || h > 23 || minutes != "00" {
+		return "", fmt.Errorf("%q is not a whole hour, such as 03:00", text)
+	}
+	return fmt.Sprintf("%02d:00", h), nil
+}
+
+// RefreshSchedule says when the package list is refreshed, as the Available
+// updates group carries it: off, every_24h, or the refresh time.
+func (c Config) RefreshSchedule() string {
+	switch {
+	case !c.PackageListRefresh:
+		return "off"
+	case c.RefreshTime != "":
+		return c.RefreshTime
+	}
+	return "every_24h"
+}
+
+// RefreshHour is the hour of RefreshTime. ok is false when none is set.
+func (c Config) RefreshHour() (hour int, ok bool) {
+	if c.RefreshTime == "" {
+		return 0, false
+	}
+	hour, _ = strconv.Atoi(c.RefreshTime[:2])
+	return hour, true
 }
 
 // LoadRootOwned is Load for the root helper. It also refuses the file when
@@ -180,6 +224,9 @@ type Setup struct {
 	// VPNAddress is Home Assistant's single VPN address. Nil keeps the
 	// current one; empty removes it.
 	VPNAddress *string
+	// RefreshTime is the hour of the daily package list refresh, such as
+	// 03:00. Nil keeps the current one; empty removes it.
+	RefreshTime *string
 }
 
 // WriteSetup writes s into the Host config at path, or into a new default
@@ -211,6 +258,15 @@ func WriteSetup(path string, s Setup) error {
 		delete(fields, "vpn_address")
 	default:
 		if fields["vpn_address"], err = json.Marshal(*s.VPNAddress); err != nil {
+			return err
+		}
+	}
+	switch {
+	case s.RefreshTime == nil:
+	case *s.RefreshTime == "":
+		delete(fields, "refresh_time")
+	default:
+		if fields["refresh_time"], err = json.Marshal(*s.RefreshTime); err != nil {
 			return err
 		}
 	}

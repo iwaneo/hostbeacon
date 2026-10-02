@@ -123,7 +123,8 @@ func newTestOwner(t *testing.T, input string) *testOwner {
 		run: func(context.Context, string, ...string) ([]byte, error) {
 			return nil, errors.New("not on this Host")
 		},
-		tailscale: func() bool { return false },
+		tailscale:      func() bool { return false },
+		packageManager: func() bool { return false },
 	}
 	if _, _, err := identity.Start(o.stateDir, installSignals); err != nil {
 		t.Fatal(err)

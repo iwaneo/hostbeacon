@@ -171,6 +171,12 @@ class UpdatesEntity(HostEntity, UpdateEntity):
             parts.append(text("list_age", age=_age(when)))
         else:
             parts.append(text("list_never"))
+        # Agents before protocol 1.2 do not send the schedule.
+        if (schedule := groups.available_updates.refresh_schedule if groups.available_updates else None) is not None:
+            if schedule in ("off", "every_24h"):
+                parts.append(text(f"schedule_{schedule}"))
+            else:
+                parts.append(text("schedule_daily", time=schedule))
         if "update_run" not in self._connection.enabled_actions:
             parts.append(text("update_run_off", host=self._entry_title))
         return "\n\n".join(parts)

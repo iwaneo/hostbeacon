@@ -27,8 +27,9 @@ var actionNames = []struct {
 	{protocol.ActionAgentUpdate, "Agent update", "Home Assistant can update the Agent to a newer signed release"},
 }
 
-// setup turns Actions on or off, allows Home Assistant's VPN address, opens
-// the firewall port, and shows a Pairing code (v1 spec §4.3). Each question
+// setup turns Actions on or off, allows Home Assistant's VPN address, sets
+// the refresh time, opens the firewall port, and shows a Pairing code (v1
+// spec §4.3). Each question
 // keeps the current answer on Enter, so after install every Action defaults
 // to No. With any flag it asks nothing and changes only what the flags name.
 func setup(args []string, o owner) error {
@@ -37,6 +38,7 @@ func setup(args []string, o owner) error {
 	stateDir := flags.String("state-dir", defaultStateDir, "the Agent's state directory")
 	actionsFlag := flags.String("actions", "", "the Actions to turn on, comma-separated: reboot, update_run, agent_update, or none; the others are turned off")
 	vpnFlag := flags.String("vpn-address", "", "Home Assistant's single VPN address (for example its Tailscale address), or none")
+	refreshFlag := flags.String("refresh-time", "", "the hour of the daily package list refresh in this Host's local time, such as 03:00, or none for once every 24 hours")
 	openFirewall := flags.Bool("open-firewall", false, "open the Agent's TCP port in firewalld or ufw")
 	pairNow := flags.Bool("pair", false, "show a Pairing code")
 	if err := flags.Parse(args); err != nil {
@@ -76,6 +78,9 @@ func setup(args []string, o owner) error {
 		if o.tailscale() {
 			answers.VPNAddress = askVPNAddress(in, o, current.VPNAddress)
 		}
+		if current.PackageListRefresh && o.packageManager() {
+			answers.RefreshTime = askRefreshTime(in, o, current.RefreshTime)
+		}
 		*openFirewall = firewall != "" && ask(in, o, fmt.Sprintf("%s is running. Open TCP port %d for the Agent? [y/N]: ", firewall, current.Port), false)
 	} else {
 		if flagSet(flags, "actions") {
@@ -92,6 +97,15 @@ func setup(args []string, o owner) error {
 			}
 			answers.VPNAddress = &address
 		}
+		if flagSet(flags, "refresh-time") {
+			refreshTime := ""
+			if *refreshFlag != "none" {
+				if refreshTime, err = config.ParseRefreshTime(*refreshFlag); err != nil {
+					return fmt.Errorf("--refresh-time must be a whole hour, such as 03:00, or none: %w", err)
+				}
+			}
+			answers.RefreshTime = &refreshTime
+		}
 	}
 
 	if err := config.WriteSetup(*configPath, answers); err != nil {
@@ -102,6 +116,9 @@ func setup(args []string, o owner) error {
 		on = "Turned on: " + names + "."
 	}
 	fmt.Fprintf(o.out, "\nSaved %s. %s\n", *configPath, on)
+	if answers.RefreshTime != nil {
+		fmt.Fprintln(o.out, refreshSchedule(*answers.RefreshTime))
+	}
 	if err := o.restart(); err != nil {
 		fmt.Fprintln(o.out, "Restart the Agent now, so Home Assistant sees the change: sudo systemctl restart hostbeacon")
 	}
@@ -184,6 +201,46 @@ func askVPNAddress(in *bufio.Reader, o owner, current netip.Addr) *string {
 		}
 		fmt.Fprintln(o.out, "Enter one address, such as 100.101.102.103, not a range.")
 	}
+}
+
+// askRefreshTime asks for the hour of the daily package list refresh (v1
+// spec §4.6). Enter keeps the current answer.
+func askRefreshTime(in *bufio.Reader, o owner, current string) *string {
+	question := "The package list is refreshed once every 24 hours. To refresh it at a fixed hour of this Host's local time, enter the hour (for example 03:00), or press Enter to skip: "
+	if current != "" {
+		question = fmt.Sprintf("The package list is refreshed daily at %s. Enter a new hour, none for once every 24 hours, or press Enter to keep it: ", current)
+	}
+	for {
+		fmt.Fprint(o.out, question)
+		line, err := in.ReadString('\n')
+		text := strings.TrimSpace(line)
+		switch {
+		case text == "":
+			if err != nil {
+				fmt.Fprintln(o.out)
+			}
+			return nil
+		case strings.EqualFold(text, "none"):
+			empty := ""
+			return &empty
+		}
+		if refreshTime, parseErr := config.ParseRefreshTime(text); parseErr == nil {
+			return &refreshTime
+		}
+		if err != nil {
+			fmt.Fprintln(o.out)
+			return nil
+		}
+		fmt.Fprintln(o.out, "Enter a whole hour, such as 03:00.")
+	}
+}
+
+// refreshSchedule says when the package list is refreshed.
+func refreshSchedule(refreshTime string) string {
+	if refreshTime == "" {
+		return "The package list is refreshed once every 24 hours."
+	}
+	return fmt.Sprintf("The package list is refreshed daily at %s, this Host's local time.", refreshTime)
 }
 
 func parseActions(text string) ([]protocol.Action, error) {

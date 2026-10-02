@@ -88,8 +88,10 @@ sudo hostbeacon setup
 
 1. which **Actions** to turn on (each one is off unless you answer yes);
 2. only if Tailscale runs on the Host: Home Assistant's **VPN address**;
-3. only if firewalld or ufw runs: whether to **open port 8743**;
-4. whether to show a **Pairing code** now.
+3. on Debian, Ubuntu, and Fedora-family Hosts: the
+   [refresh time](#package-list-refresh) (press Enter to skip);
+4. only if firewalld or ufw runs: whether to **open port 8743**;
+5. whether to show a **Pairing code** now.
 
 For scripted installs, give flags instead; `setup` then asks nothing and
 changes only what the flags name:
@@ -158,6 +160,24 @@ loopback.
   Use `--vpn-address none` to remove it.
 
 Then add the Host [by address](#adding-a-host-by-address).
+
+## Package list refresh
+
+On Debian, Ubuntu, and Fedora-family Hosts, the Agent refreshes the package
+list (`apt-get update` or `dnf makecache`) once every 24 hours, so Home
+Assistant sees new updates. Home Assistant cannot start or change it.
+
+To refresh at a fixed hour instead, for example to line up all your Hosts, set
+the **refresh time** (a whole hour, in the Host's local time):
+
+```sh
+sudo hostbeacon setup --refresh-time 03:00
+```
+
+The refresh then runs daily within 5 minutes after that hour. If the Host was
+off, or another package task was running, it catches up at the next hourly
+check. Use `--refresh-time none` to go back to once every 24 hours. The
+**Updates** entity in Home Assistant shows the schedule in its release notes.
 
 ## Updating the Agent
 

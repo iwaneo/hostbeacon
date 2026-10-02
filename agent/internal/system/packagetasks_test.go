@@ -61,6 +61,18 @@ func TestAvailableUpdatesCarryTheLastRefreshTime(t *testing.T) {
 	}
 }
 
+func TestAvailableUpdatesCarryTheRefreshSchedule(t *testing.T) {
+	host := detect(t, fakeHost(t), "none", nil)
+	collector := NewCollector(host, DefaultIntervals, agentInfo)
+	if updates := collector.Sample(context.Background()).AvailableUpdates; updates.RefreshSchedule != nil {
+		t.Errorf("unknown schedule: %q, want it left out", *updates.RefreshSchedule)
+	}
+	host.RefreshSchedule = "03:00"
+	if updates := collector.Sample(context.Background()).AvailableUpdates; updates.RefreshSchedule == nil || *updates.RefreshSchedule != "03:00" {
+		t.Errorf("refresh schedule %v, want 03:00", updates.RefreshSchedule)
+	}
+}
+
 func TestPackageTaskRunningFlag(t *testing.T) {
 	host := detect(t, fakeHost(t), "none", nil)
 	collector := NewCollector(host, DefaultIntervals, agentInfo)

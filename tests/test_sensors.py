@@ -195,7 +195,7 @@ async def test_diagnostic_sensors(hass: HomeAssistant, agent: FakeAgent) -> None
 
     assert state(hass, entry, "environment") == "vm"
     assert state(hass, entry, "kernel") == "6.12.48+deb13-amd64"
-    assert state(hass, entry, "protocol_version") == "1.1"
+    assert state(hass, entry, "protocol_version") == "1.2"
     seen = dt_util.parse_datetime(state(hass, entry, "last_seen"))
     assert before - timedelta(seconds=1) <= seen <= dt_util.utcnow()
 
