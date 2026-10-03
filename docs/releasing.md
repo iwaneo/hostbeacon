@@ -12,13 +12,13 @@ v1.0.0.)
    against a test Home Assistant; the Integration's added CPU stays under 5%
    of one core.
 2. **Tag** the candidate `v<major>.<minor>.<patch>` on `main` and push it.
-   The release workflow builds the packages and runs the Agent budget check
+   The release workflow builds the packages and runs the runtime resource utilization check
    for 1 hour on a native arm64 runner. The owner then approves the `release` environment,
    and the workflow signs and publishes the release with the arm64 numbers in
    its notes.
-3. **Agent budget on the test Hosts**: install the candidate on the Debian
+3. **Runtime resource utilization on the test Hosts**: install the candidate on the Debian
    and Fedora test Hosts, paired with the test Home Assistant, then run
-   `sudo sh agent/packaging/test/budget-check.sh` on each (1 hour). Limits:
+   `sudo sh agent/packaging/test/resource-utilization-check.sh` on each (1 hour). Limits:
    at most 30 MB memory and 1% of one core on average, both parts together.
    A QEMU-emulated run does not count.
 4. **Manual checks** on both test Hosts with the test Home Assistant (real

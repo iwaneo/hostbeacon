@@ -114,7 +114,7 @@ jobs:
         run: uv run pytest
 
   # 100 simulated Agents against a test Home Assistant in Docker; checks the
-  # Integration's CPU budget (v1 spec §4.6, §14).
+  # Integration's CPU limit (v1 spec §4.6, §14).
   load:
     name: Load test (100 Agents)
     runs-on: ubuntu-24.04
