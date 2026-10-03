@@ -10,7 +10,7 @@ import (
 // Disable turns off transparent huge pages for this process and the
 // programs it starts. Where the kernel gives them to every process (THP
 // "always", as on Debian), each 2 MB page holds a little of the Agent's
-// memory, which took it past the resource budget (v1 spec §4.6).
+// memory, which took it past the resource limits (v1 spec §4.6).
 //
 // The Go runtime has used memory before main, so the first call starts the
 // program again with the same arguments (same PID); in the new program the

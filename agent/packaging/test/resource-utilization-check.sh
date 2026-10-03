@@ -1,5 +1,5 @@
 #!/bin/sh
-# Agent budget check (v1 spec §4.6, §14): measures the installed, running
+# Runtime resource utilization check (v1 spec §4.6, §14): measures the installed, running
 # Agent on this Host with its default intervals. Passes when both parts
 # together use at most 30 MB of memory and 1% of one CPU core on average.
 #
@@ -7,7 +7,7 @@
 # seconds; the highest sample counts. CPU is what the two systemd units used,
 # with the programs they start (apt, dnf, smartctl), over the whole run.
 # Run it on real systemd, not in QEMU.
-# Usage: budget-check.sh [seconds, default 3600]
+# Usage: resource-utilization-check.sh [seconds, default 3600]
 set -eu
 duration=${1:-3600}
 units="hostbeacon.service hostbeacon-helper.service"

@@ -82,10 +82,10 @@ jobs:
           path: packages/
           if-no-files-found: error
 
-  # The Agent budget check on a native arm64 runner (v1 spec §4.6, §14): no
-  # release without it. The numbers go into the release notes.
-  budget:
-    name: Agent budget (arm64, 1 hour)
+  # The runtime resource utilization check on a native arm64 runner (v1 spec
+  # §4.6, §14): no release without it. The numbers go into the release notes.
+  resource-utilization:
+    name: Runtime resource utilization (arm64, 1 hour)
     needs: build
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
@@ -103,16 +103,16 @@ jobs:
         run: |
           set -o pipefail
           sleep 60
-          agent/packaging/test/budget-check.sh 3600 | tee budget-arm64.txt
+          agent/packaging/test/resource-utilization-check.sh 3600 | tee resource-utilization-arm64.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: budget
-          path: budget-arm64.txt
+          name: resource-utilization
+          path: resource-utilization-arm64.txt
           if-no-files-found: error
 
   release:
     name: Sign and publish
-    needs: [check, build, budget]
+    needs: [check, build, resource-utilization]
     runs-on: ubuntu-24.04
     # The owner approves each release; only this environment holds the key.
     environment: release
@@ -134,8 +134,8 @@ jobs:
           path: dist/
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: budget
-          path: budget/
+          name: resource-utilization
+          path: resource-utilization/
       - name: Install minisign
         run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends minisign
       - name: Write and sign SHA256SUMS
@@ -172,12 +172,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "## Agent resource budget (v1 spec §4.6)"
+            echo "## Agent runtime resource utilization (v1 spec §4.6)"
             echo
             echo "Native arm64 runner, no Home Assistant paired:"
             echo
             echo '```'
-            cat budget/budget-arm64.txt
+            cat resource-utilization/resource-utilization-arm64.txt
             echo '```'
           } >notes.md
           gh release create "$TAG" dist/* --verify-tag --latest --title "Hostbeacon $VERSION" --notes-file notes.md --generate-notes
